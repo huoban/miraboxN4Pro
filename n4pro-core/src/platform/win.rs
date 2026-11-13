@@ -975,14 +975,24 @@ extern "system" {
     fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> BOOL>, add: BOOL) -> BOOL;
 }
 
-/// 控制台关闭/ Ctrl+C 回调：发送退出帧
+/// 控制台关闭/ Ctrl+C 回调
 extern "system" fn ctrl_handler(ctrl_type: u32) -> BOOL {
-    crate::app::send_exit_frame_from_handler();
-    // Ctrl+C / Ctrl+Break 交回默认处理，确保进程真正退出（避免残留实例占用 HID 句柄）；
-    // 关窗/注销/关机由系统在回调返回后强制终止
     match ctrl_type {
-        0 | 1 => 0,
-        _ => 1,
+        0 | 1 => {
+            // Ctrl+C / Ctrl+Break：收进托盘，不退出（只有托盘“退出”才真正结束）
+            crate::platform::tray::hide_main_console();
+            1
+        }
+        2 => {
+            // 关闭控制台窗口：发送结束帧并重启到托盘
+            crate::app::send_exit_frame_from_handler();
+            crate::platform::tray::relaunch_hidden();
+            1
+        }
+        _ => {
+            crate::app::send_exit_frame_from_handler();
+            1
+        }
     }
 }
 

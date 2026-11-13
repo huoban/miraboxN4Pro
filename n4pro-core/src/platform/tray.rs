@@ -2,18 +2,110 @@
 // 图标来自 exe 内嵌资源（资源组 ID 1），失败时回退系统默认图标
 
 use crate::platform::win::*;
+use std::ffi::c_void;
 use std::mem::size_of;
 
 const WM_TRAY: u32 = WM_APP + 1;
 const MENU_SHOW: i32 = 1001;
 const MENU_EXIT: i32 = 1002;
 
-/// 恢复控制台窗口
+const CLSCTX_ALL: u32 = 0x17;
+const COINIT_APARTMENTTHREADED: u32 = 0x2;
+const CLSID_TASKBAR_LIST: GUID = GUID {
+    data1: 0x56FDF344,
+    data2: 0xFD6D,
+    data3: 0x11D0,
+    data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+};
+const IID_ITASKBAR_LIST: GUID = GUID {
+    data1: 0x56FDF342,
+    data2: 0xFD6D,
+    data3: 0x11D0,
+    data4: [0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90],
+};
+
+#[link(name = "ole32")]
+extern "system" {
+    fn CoInitializeEx(reserved: *mut c_void, coinit: u32) -> i32;
+    fn CoCreateInstance(
+        clsid: *const GUID,
+        outer: *mut c_void,
+        clsctx: u32,
+        iid: *const GUID,
+        out: *mut *mut c_void,
+    ) -> i32;
+    fn CoUninitialize();
+}
+
+type TaskbarReleaseFn = unsafe extern "system" fn(*mut c_void) -> u32;
+type TaskbarHrInitFn = unsafe extern "system" fn(*mut c_void) -> i32;
+type TaskbarTabFn = unsafe extern "system" fn(*mut c_void, HWND) -> i32;
+
+/// 通过 ITaskbarList 增删任务栏按钮（修复 Win11 隐藏控制台后残留图标）
+unsafe fn taskbar_tab(hwnd: HWND, add: bool) {
+    if hwnd == 0 {
+        return;
+    }
+    let hr = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
+    let mut list: *mut c_void = std::ptr::null_mut();
+    if CoCreateInstance(
+        &CLSID_TASKBAR_LIST,
+        std::ptr::null_mut(),
+        CLSCTX_ALL,
+        &IID_ITASKBAR_LIST,
+        &mut list,
+    ) >= 0
+        && !list.is_null()
+    {
+        let vt = *(list as *mut *mut *mut c_void);
+        let init: TaskbarHrInitFn = std::mem::transmute(*vt.add(3));
+        init(list);
+        let tab: TaskbarTabFn = std::mem::transmute(*vt.add(if add { 4 } else { 5 }));
+        tab(list, hwnd);
+        let release: TaskbarReleaseFn = std::mem::transmute(*vt.add(2));
+        release(list);
+    }
+    if hr >= 0 {
+        CoUninitialize();
+    }
+}
+
+/// 隐藏控制台并移除任务栏按钮
+fn hide_console() {
+    unsafe {
+        let console = GetConsoleWindow();
+        if console != 0 {
+            ShowWindow(console, SW_HIDE);
+            taskbar_tab(console, false);
+        }
+    }
+}
+
+/// 恢复控制台并重新加入任务栏
 unsafe fn restore_console() {
     let console = GetConsoleWindow();
     if console != 0 {
+        taskbar_tab(console, true);
         ShowWindow(console, SW_RESTORE);
         SetForegroundWindow(console);
+    }
+}
+
+/// 供 Ctrl+C 回调使用：把控制台收进托盘
+pub fn hide_main_console() {
+    hide_console();
+}
+
+/// 关闭控制台窗口后重启自身（新实例隐藏到托盘）
+pub fn relaunch_hidden() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    if let Ok(exe) = std::env::current_exe() {
+        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+        let _ = std::process::Command::new(exe)
+            .args(args)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn();
     }
 }
 
@@ -64,10 +156,10 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize {
             return 0;
         }
         if msg == WM_TIMER {
-            // 点最小化按钮后把控制台收进托盘
+            // 点最小化按钮后把控制台收进托盘（同时移除任务栏按钮）
             let console = GetConsoleWindow();
             if console != 0 && IsIconic(console) != 0 {
-                ShowWindow(console, SW_HIDE);
+                hide_console();
             }
             return 0;
         }
@@ -147,10 +239,7 @@ pub fn setup() {
         SetTimer(hwnd, 1, 400, 0);
 
         // 启动即隐藏到托盘
-        let console = GetConsoleWindow();
-        if console != 0 {
-            ShowWindow(console, SW_HIDE);
-        }
+        hide_console();
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, 0, 0, 0) > 0 {

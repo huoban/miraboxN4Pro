@@ -11,6 +11,7 @@ mod render;
 
 use platform::win::*;
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn arg_value(args: &[String], name: &str) -> Option<String> {
     let mut it = args.iter();
@@ -61,13 +62,31 @@ fn main() {
         crate::platform::tray::setup();
     }
 
-    // 单实例互斥，避免双开抢占 HID
+    // 单实例互斥，避免双开抢占 HID；关窗重启时等待旧实例退出
     let mutex_name = to_wide("Local\\N4ProCore_SingleInstance");
-    let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
-    let mutex_err = unsafe { GetLastError() };
-    if mutex == 0 {
-        log_warn!("单实例互斥创建失败，错误码 {}", mutex_err);
-    } else if mutex_err == ERROR_ALREADY_EXISTS {
+    let mut mutex: HANDLE = 0;
+    let mut acquired = false;
+    for attempt in 0..20 {
+        let h = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
+        let err = unsafe { GetLastError() };
+        if h == 0 {
+            log_warn!("单实例互斥创建失败，错误码 {}", err);
+            break;
+        }
+        if err != ERROR_ALREADY_EXISTS {
+            mutex = h;
+            acquired = true;
+            break;
+        }
+        if attempt == 0 {
+            log_info!("已有实例在运行，等待其退出…");
+        }
+        unsafe {
+            CloseHandle(h);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    if !acquired {
         log_warn!("已有实例在运行，本次退出");
         if !serve {
             println!("已有实例在运行，本次退出");
