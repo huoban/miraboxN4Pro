@@ -1,6 +1,6 @@
 [package]
 name = "n4pro-core"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 description = "N4 Pro 按键屏重制版（只读配置 / 纯 HID / 无 UI）"
 

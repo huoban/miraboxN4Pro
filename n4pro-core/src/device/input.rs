@@ -73,10 +73,11 @@ pub fn parse(buf: &[u8]) -> Option<InputEvent> {
             0xA1..=0xA4 => InputEvent::DialRotate {
                 id: index - 0xA1 + 1,
             },
-            0x37..=0x3A => InputEvent::DialPress {
-                id: index - 0x37 + 1,
-                down: state == 1,
-            },
+            // 旋钮按下编码（实测/协议文档）：0x37=1、0x35=2、0x33=3、0x36=4
+            0x37 => InputEvent::DialPress { id: 1, down: state == 1 },
+            0x35 => InputEvent::DialPress { id: 2, down: state == 1 },
+            0x33 => InputEvent::DialPress { id: 3, down: state == 1 },
+            0x36 => InputEvent::DialPress { id: 4, down: state == 1 },
             _ => InputEvent::Unknown { index, state },
         });
     }
