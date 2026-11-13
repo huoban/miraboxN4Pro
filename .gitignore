@@ -1,0 +1,9 @@
+# 编译产物
+n4pro-core/target/
+# 运行日志与转储
+n4pro-core/logs/
+n4pro-core/frames_dump.txt
+# 大型逆向证据（随压缩包备份，不进入 Git）
+docs/evidence/
+# 备份包自身
+backups/

@@ -1,0 +1,18 @@
+[package]
+name = "n4pro-core"
+version = "0.2.0"
+edition = "2021"
+description = "N4 Pro 按键屏重制版（只读配置 / 纯 HID / 无 UI）"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+ureq = "2.12"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
