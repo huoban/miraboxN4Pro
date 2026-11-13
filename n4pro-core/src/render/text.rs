@@ -62,7 +62,9 @@ pub fn draw_text_rect(
     }
     let w = canvas.width as i32;
     let h = canvas.height as i32;
-    let size = size_px.clamp(8, area_h.max(8));
+    // 官方 Qt 字号按 pt 计算，GDI 使用像素高度，按 96DPI 换算（20pt ≈ 27px）
+    let scaled = ((size_px as f32) * (96.0 / 72.0)).round() as i32;
+    let size = scaled.clamp(8, area_h.max(8));
     unsafe {
         let screen = GetDC(0);
         let mem = CreateCompatibleDC(screen);

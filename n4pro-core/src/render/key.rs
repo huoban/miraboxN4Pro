@@ -61,7 +61,7 @@ pub fn render_key(action: Option<&ActionDef>, base_dir: &Path, state_idx: usize)
                         state.underline,
                         state.title_color,
                         TextAlign::parse(&state.alignment),
-                        4,
+                        1,
                     );
                 }
             }

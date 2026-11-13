@@ -114,7 +114,7 @@ pub fn render_knob(
                         state.underline,
                         state.title_color,
                         TextAlign::parse(&state.alignment),
-                        4,
+                        2,
                     );
                 }
             }
