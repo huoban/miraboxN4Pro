@@ -660,13 +660,26 @@ impl App {
             return;
         }
         self.key_down[index as usize] = down;
-        let pos = key_pos(index);
+        // 动作绑定位置与图像渲染位置分开：上排(y1)对应配置 y2，下排(y2)对应配置 y1
+        let pos = key_action_pos(index);
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
+                crate::log_info!(
+                    "按键 {}（图像槽位 {}，配置 {}）执行 {}",
+                    index,
+                    key_slot(index),
+                    pos,
+                    def.name
+                );
                 let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
                 self.apply_effect(effect);
             } else {
-                crate::log_info!("按键 {}（{}）未绑定动作", index, pos);
+                crate::log_info!(
+                    "按键 {}（图像槽位 {}，配置 {}）未绑定动作",
+                    index,
+                    key_slot(index),
+                    pos
+                );
             }
         }
         // 按用户要求：按键操作不触发图像刷新，仅在切页时整页重绘
@@ -915,13 +928,23 @@ impl App {
     }
 }
 
-/// 按键编号（1..10）→ 配置位置
+/// 按键编号（1..10）→ 配置位置（图像渲染用：上排 y1、下排 y2）
 pub fn key_pos(key: u8) -> String {
     if key == 0 {
         return "0,0".to_string();
     }
     let x = (key - 1) % 5;
     let y = if key <= 5 { 1 } else { 2 };
+    format!("{},{}", x, y)
+}
+
+/// 按键动作绑定位置：与图像渲染上下互换（上排 → 配置 y2，下排 → 配置 y1）
+pub fn key_action_pos(key: u8) -> String {
+    if key == 0 {
+        return "0,0".to_string();
+    }
+    let x = (key - 1) % 5;
+    let y = if key <= 5 { 2 } else { 1 };
     format!("{},{}", x, y)
 }
 
