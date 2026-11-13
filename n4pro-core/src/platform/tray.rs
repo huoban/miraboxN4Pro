@@ -70,22 +70,29 @@ unsafe fn taskbar_tab(hwnd: HWND, add: bool) {
     }
 }
 
-/// 隐藏控制台并移除任务栏按钮
+/// 隐藏控制台并移除任务栏按钮（Win11 下延迟重建，需要多次补删）
 fn hide_console() {
     unsafe {
         let console = GetConsoleWindow();
-        if console != 0 {
-            ShowWindow(console, SW_HIDE);
-            taskbar_tab(console, false);
+        if console == 0 {
+            return;
         }
+        ShowWindow(console, SW_HIDE);
+        taskbar_tab(console, false);
+        // 后台补删：处理 Win11 隐藏后延迟重建的任务栏按钮
+        std::thread::spawn(move || unsafe {
+            for ms in [80u64, 200, 400] {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                taskbar_tab(console, false);
+            }
+        });
     }
 }
 
-/// 恢复控制台并重新加入任务栏
+/// 恢复控制台（任务栏按钮由系统随窗口显示自动恢复，不再手动 AddTab）
 unsafe fn restore_console() {
     let console = GetConsoleWindow();
     if console != 0 {
-        taskbar_tab(console, true);
         ShowWindow(console, SW_RESTORE);
         SetForegroundWindow(console);
     }
