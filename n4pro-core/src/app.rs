@@ -184,15 +184,12 @@ impl App {
                         std::thread::sleep(Duration::from_millis(200));
                         continue;
                     }
-                    // 节流：避免瞬间高压导致设备丢帧/掉线
+                    // 节流：数据帧连发（0ms），图片头/结束帧留少量间隔
                     let tag = if frame.len() >= 9 { &frame[6..9] } else { &frame[..0] };
                     if tag == b"BAT" {
-                        // 两张图片之间留出处理时间
-                        std::thread::sleep(Duration::from_millis(60));
+                        std::thread::sleep(Duration::from_millis(10));
                     } else if tag == b"STP" || tag == b"CONNECT" {
                         std::thread::sleep(Duration::from_millis(30));
-                    } else {
-                        std::thread::sleep(Duration::from_millis(5));
                     }
                 }
             });
@@ -317,12 +314,10 @@ impl App {
         }
     }
 
-    /// 整页刷新：CLE → 触摸条（Control Bar=BGPIC / 旋钮模式=黑条+槽位1~4）→ 10 键 BAT → SETLB → STP
-    fn refresh_all(&mut self) {
-        let mut frames = vec![protocol::cle()];
-
+    /// 触摸条帧（Control Bar=BGPIC / 旋钮模式=黑条+1~4 区）
+    fn touchbar_frames(&mut self) -> Vec<Vec<u8>> {
+        let mut frames = Vec::new();
         if self.knob_mode {
-            // 旋钮模式：先清整条，再发 4 个分区
             if !self.no_bgpic {
                 if let Ok(black) = render_black_bar() {
                     frames.extend(protocol::bgpic_frames(&black, 800, 130));
@@ -335,12 +330,27 @@ impl App {
                 }
             }
         } else if !self.no_bgpic {
-            // Control Bar：整条 BGPIC（5 按钮 + 箭头）
             match self.bar_png() {
                 Ok(png) => frames.extend(protocol::bgpic_frames(&png, 800, 130)),
                 Err(e) => crate::log_error!("Control Bar 渲染失败：{}", e),
             }
         }
+        frames
+    }
+
+    /// 只刷新触摸条（模式切换 / 滑动时使用，不动按键）
+    fn refresh_touchbar(&mut self) {
+        let mut frames = self.touchbar_frames();
+        frames.push(protocol::setlb());
+        frames.push(protocol::stp());
+        crate::log_info!("触摸条刷新，共 {} 帧", frames.len());
+        self.emit(frames);
+    }
+
+    /// 整页刷新：CLE → 触摸条 → 10 键 BAT → SETLB → STP（仅切页/启动时调用）
+    fn refresh_all(&mut self) {
+        let mut frames = vec![protocol::cle()];
+        frames.extend(self.touchbar_frames());
 
         // 10 个物理按键（映射保持 slot = key + 5，不再改动）
         for key in 1u8..=10 {
@@ -361,10 +371,14 @@ impl App {
         self.emit(frames);
     }
 
-    /// Control Bar 最大滚动偏移
+    /// Control Bar 最大滚动偏移：保证最后一个按钮能完整显示
     fn max_scroll(&self) -> i32 {
-        let content = self.scene.touchbar.len() as i32 * BTN_STEP;
-        (content - 775).max(0)
+        let n = self.scene.touchbar.len() as i32;
+        if n <= 0 {
+            return 0;
+        }
+        let content_right = 25 + (n - 1) * BTN_STEP + 142;
+        (content_right - 780).max(0)
     }
 
     /// Control Bar 整条图像（800×130）
@@ -457,7 +471,7 @@ impl App {
                     if control_bar { "Control Bar" } else { "旋钮模式" }
                 );
                 self.cache.clear();
-                self.refresh_all();
+                self.refresh_touchbar();
             }
             InputEvent::Unknown { index, state } => {
                 crate::log_info!("未知输入事件：idx=0x{:02X} state={}", index, state);
@@ -479,11 +493,7 @@ impl App {
                 crate::log_info!("按键 {}（{}）未绑定动作", index, pos);
             }
         }
-        // 更新该键图像
-        if let Ok(png) = self.key_png(&pos, index) {
-            let slot = key_slot(index);
-            self.emit(protocol::bat_frames(&png, slot));
-        }
+        // 按用户要求：按键操作不触发图像刷新，仅在切页时整页重绘
     }
 
     fn on_dial_rotate(&mut self, id: u8) {
