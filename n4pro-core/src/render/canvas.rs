@@ -76,41 +76,15 @@ impl Canvas {
         }
     }
 
-    /// 等比缩放并完整放入目标区域（居中，留黑边）
-    pub fn draw_contain(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
-        if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
-            return;
-        }
-        let scale = f64::min(dw as f64 / img.width() as f64, dh as f64 / img.height() as f64);
-        let nw = (img.width() as f64 * scale).round().max(1.0) as u32;
-        let nh = (img.height() as f64 * scale).round().max(1.0) as u32;
-        let resized = image::imageops::resize(img, nw, nh, image::imageops::FilterType::Triangle);
-        let ox = dx + ((dw - nw) / 2) as i32;
-        let oy = dy + ((dh - nh) / 2) as i32;
-        for y in 0..nh {
-            for x in 0..nw {
-                let p = resized.get_pixel(x, y);
-                self.blend(ox + x as i32, oy + y as i32, [p[0], p[1], p[2], p[3]]);
-            }
-        }
-    }
-
-    /// 官方图标规则：等比完整放入目标区域并居中；
-    /// 原图宽高均未超过目标框时保持原尺寸（不放大），否则等比缩小
+    /// 官方图标规则：等比缩放完整放入目标框并居中（小图放大、大图缩小，均不裁剪、不拉伸）
     pub fn draw_fit(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
         if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
             return;
         }
         let (iw, ih) = (img.width(), img.height());
-        let (nw, nh) = if iw <= dw && ih <= dh {
-            (iw, ih)
-        } else {
-            let scale = f64::min(dw as f64 / iw as f64, dh as f64 / ih as f64);
-            (
-                (iw as f64 * scale).round().max(1.0) as u32,
-                (ih as f64 * scale).round().max(1.0) as u32,
-            )
-        };
+        let scale = f64::min(dw as f64 / iw as f64, dh as f64 / ih as f64);
+        let nw = (iw as f64 * scale).round().max(1.0) as u32;
+        let nh = (ih as f64 * scale).round().max(1.0) as u32;
         let resized = if nw == iw && nh == ih {
             None
         } else {
@@ -185,7 +159,7 @@ mod tests {
         assert_eq!(px(0, 0), [0, 0, 0]);
         assert_eq!(px(56, 0), [0, 0, 0]);
 
-        // 10×20 小图保持原尺寸并居中
+        // 10×20 小图等比放大到 56×112 并居中
         let small = RgbaImage::from_pixel(10, 20, Rgba([0, 255, 0, 255]));
         let mut c2 = Canvas::new_black(112, 112);
         c2.draw_fit(&small, 0, 0, 112, 112);
@@ -194,6 +168,7 @@ mod tests {
             [c2.data[i], c2.data[i + 1], c2.data[i + 2]]
         };
         assert_eq!(px2(56, 56), [0, 255, 0]);
-        assert_eq!(px2(50, 45), [0, 0, 0]);
+        assert_eq!(px2(28, 10), [0, 255, 0]);
+        assert_eq!(px2(0, 0), [0, 0, 0]);
     }
 }
