@@ -39,22 +39,26 @@ pub fn render_control_bar(
         if let Some(state) = def.states.first() {
             if let Some(img) = state.image.as_deref().and_then(|s| load_icon(base_dir, s)) {
                 canvas.draw_cover(&img, x, BTN_Y, BTN_W, BTN_H);
-            } else if let Some(title) = state.title.as_deref() {
-                draw_text_rect(
-                    &mut canvas,
-                    title,
-                    &state.font_family,
-                    16,
-                    state.bold,
-                    false,
-                    state.title_color,
-                    TextAlign::Middle,
-                    4,
-                    x,
-                    BTN_Y,
-                    BTN_W as i32,
-                    BTN_H as i32,
-                );
+            }
+            // 文字层：官方编辑器在按钮图上叠加 States[].Title
+            if state.show_title {
+                if let Some(title) = state.title.as_deref() {
+                    draw_text_rect(
+                        &mut canvas,
+                        title,
+                        &state.font_family,
+                        state.font_size.min(18),
+                        state.bold,
+                        state.underline,
+                        state.title_color,
+                        TextAlign::parse(&state.alignment),
+                        2,
+                        x,
+                        BTN_Y,
+                        BTN_W as i32,
+                        BTN_H as i32,
+                    );
+                }
             }
         }
     }
@@ -94,6 +98,8 @@ pub fn render_control_bar(
         );
     }
 
+    // 面板相对编辑器旋转 180° 安装：整条图需预旋转（与按键一致）
+    canvas.rotate180();
     canvas.encode_png()
 }
 
