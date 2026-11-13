@@ -39,9 +39,11 @@ fn main() {
     let mode = arg_value(&args, "--mode");
     let profile = arg_value(&args, "--profile").map(PathBuf::from);
 
-    let log_path = logging::init(!serve);
+    logging::init(!serve);
     // 鼠标绝对坐标需要与官方一致的 DPI 感知
     set_dpi_aware();
+    // 控制台缓冲区固定 50 行：旧日志自动滚掉，不占内存
+    setup_console(50);
     // 崩溃信息写入日志，便于定位
     std::panic::set_hook(Box::new(|info| {
         crate::logging::error(format!("程序异常：{}", info));
@@ -51,8 +53,13 @@ fn main() {
     }
 
     log_info!("N4ProCore 启动，版本 {}", env!("CARGO_PKG_VERSION"));
-    log_info!("日志文件：{}", log_path.display());
+    log_info!("服务版启动参数：n4pro-core.exe -serve（静默后台，无控制台）");
+    log_info!("项目地址：https://github.com/huoban/miraboxN4Pro");
     install_ctrl_handler();
+    if !serve {
+        // 双击启动后隐藏到系统托盘；双击托盘图标恢复控制台
+        crate::platform::tray::setup();
+    }
 
     // 单实例互斥，避免双开抢占 HID
     let mutex_name = to_wide("Local\\N4ProCore_SingleInstance");

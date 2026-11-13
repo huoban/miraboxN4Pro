@@ -733,6 +733,139 @@ extern "system" {
     pub fn GetModuleHandleW(name: *const u16) -> HANDLE;
 }
 
+// ---------------- 控制台与系统托盘 ----------------
+
+pub const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5;
+pub const SW_RESTORE: i32 = 9;
+pub const WM_APP: u32 = 0x8000;
+pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
+pub const WM_RBUTTONUP: u32 = 0x0205;
+pub const WM_TIMER: u32 = 0x0113;
+pub const NIF_MESSAGE: u32 = 0x0000_0001;
+pub const NIF_ICON: u32 = 0x0000_0002;
+pub const NIF_TIP: u32 = 0x0000_0004;
+pub const NIM_ADD: u32 = 0x0000_0000;
+pub const NIM_DELETE: u32 = 0x0000_0002;
+pub const TPM_RIGHTBUTTON: u32 = 0x0002;
+pub const TPM_RETURNCMD: u32 = 0x0100;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct COORD {
+    pub x: i16,
+    pub y: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SMALL_RECT {
+    pub left: i16,
+    pub top: i16,
+    pub right: i16,
+    pub bottom: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct CONSOLE_SCREEN_BUFFER_INFO {
+    pub size: COORD,
+    pub cursor_position: COORD,
+    pub attributes: u16,
+    pub window: SMALL_RECT,
+    pub maximum_window_size: COORD,
+}
+
+#[repr(C)]
+pub struct NOTIFYICONDATAW {
+    pub cb_size: u32,
+    pub hwnd: HWND,
+    pub u_id: u32,
+    pub u_flags: u32,
+    pub u_callback_message: u32,
+    pub h_icon: HANDLE,
+    pub sz_tip: [u16; 128],
+    pub dw_state: u32,
+    pub dw_state_mask: u32,
+    pub sz_info: [u16; 256],
+    pub u_version: u32,
+    pub sz_info_title: [u16; 64],
+    pub dw_info_flags: u32,
+    pub guid_item: GUID,
+    pub h_balloon_icon: HANDLE,
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn GetStdHandle(kind: u32) -> HANDLE;
+    pub fn GetConsoleScreenBufferInfo(h: HANDLE, info: *mut CONSOLE_SCREEN_BUFFER_INFO) -> BOOL;
+    pub fn SetConsoleScreenBufferSize(h: HANDLE, size: COORD) -> BOOL;
+    pub fn SetConsoleWindowInfo(h: HANDLE, absolute: BOOL, rect: *const SMALL_RECT) -> BOOL;
+}
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn IsIconic(hwnd: HWND) -> BOOL;
+    pub fn SetForegroundWindow(hwnd: HWND) -> BOOL;
+    pub fn LoadIconW(instance: HANDLE, name: *const u16) -> HANDLE;
+    pub fn Shell_NotifyIconW(op: u32, data: *mut NOTIFYICONDATAW) -> BOOL;
+    pub fn CreatePopupMenu() -> HANDLE;
+    pub fn AppendMenuW(menu: HANDLE, flags: u32, id: usize, text: *const u16) -> BOOL;
+    pub fn DestroyMenu(menu: HANDLE) -> BOOL;
+    pub fn TrackPopupMenu(
+        menu: HANDLE,
+        flags: u32,
+        x: i32,
+        y: i32,
+        reserved: i32,
+        hwnd: HWND,
+        rect: *const RECT,
+    ) -> BOOL;
+    pub fn GetCursorPos(p: *mut POINT) -> BOOL;
+    pub fn SetTimer(hwnd: HWND, id: usize, ms: u32, proc: usize) -> usize;
+    pub fn KillTimer(hwnd: HWND, id: usize) -> BOOL;
+    pub fn GetMessageW(msg: *mut MSG, hwnd: HWND, min: u32, max: u32) -> BOOL;
+}
+
+/// 控制台缓冲区高度固定为指定行数（旧日志自动滚掉）
+pub fn setup_console(height: i16) {
+    unsafe {
+        let h = GetStdHandle(STD_OUTPUT_HANDLE);
+        if h == 0 || h == INVALID_HANDLE_VALUE {
+            return;
+        }
+        let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+        if GetConsoleScreenBufferInfo(h, &mut info) == 0 {
+            return;
+        }
+        let width = info.size.x.max(80);
+        let window_height = info.window.bottom - info.window.top + 1;
+        // 先把窗口高度收进目标缓冲区，再设置缓冲区高度
+        if window_height > height {
+            let rect = SMALL_RECT {
+                left: 0,
+                top: 0,
+                right: width - 1,
+                bottom: height - 1,
+            };
+            SetConsoleWindowInfo(h, 1, &rect);
+        }
+        SetConsoleScreenBufferSize(
+            h,
+            COORD {
+                x: width,
+                y: height,
+            },
+        );
+        let rect = SMALL_RECT {
+            left: 0,
+            top: 0,
+            right: width - 1,
+            bottom: height - 1,
+        };
+        SetConsoleWindowInfo(h, 1, &rect);
+    }
+}
+
 /// ShellExecuteW 打开路径/网址
 pub fn shell_open(target: &str) -> bool {
     let op = to_wide("open");
