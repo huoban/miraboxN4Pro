@@ -56,15 +56,15 @@ pub fn load(profile_override: Option<&Path>) -> Result<AppConfig, String> {
         .and_then(|v| v.trim().parse::<i32>().ok())
         .unwrap_or(0);
 
-    // 触摸条模式：SlideSwitchMode != 0 视为旋钮模式（官方默认 0=Control Bar）
-    let mut knob_mode = false;
-    for section in ini.section_names() {
-        if section.starts_with("MBoxN4") && section.contains(&serial) {
-            if let Some(v) = ini.get(&section, "SlideSwitchMode") {
-                knob_mode = v.trim() == "1";
-            }
-        }
+    // 触摸条模式：以设备段的 enableTouchBarMode 为准（true=Control Bar，false=旋钮模式）
+    let device_mode_section = format!("{}{}", device, serial);
+    let mut control_bar = false;
+    if let Some(v) = ini.get(&device_mode_section, "enableTouchBarMode") {
+        control_bar = v.trim().eq_ignore_ascii_case("true");
+    } else if let Some(v) = ini.get("MBoxN4", "enableTouchBarMode") {
+        control_bar = v.trim().eq_ignore_ascii_case("true");
     }
+    let knob_mode = !control_bar;
 
     Ok(AppConfig {
         ini_path,

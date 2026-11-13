@@ -1,69 +1,103 @@
-// 触摸条渲染：800×130，Control Bar（5 槽）与旋钮模式（4 槽），发送前旋转 180°
+// 触摸条渲染：Control Bar（800×130，5 按钮 + 箭头），
+// 以及旋钮模式的 4 个 176×112 分区（由 knob.rs 负责单区）。
+// 实测：Control Bar 由 BGPIC 下发且不旋转。
 
 use crate::config::ActionDef;
 use crate::render::canvas::Canvas;
 use crate::render::key::load_icon;
 use crate::render::text::{draw_text_rect, TextAlign};
-use std::collections::BTreeMap;
 use std::path::Path;
 
 pub const BAR_WIDTH: u32 = 800;
 pub const BAR_HEIGHT: u32 = 130;
+pub const BTN_W: u32 = 142;
+pub const BTN_H: u32 = 66;
+pub const BTN_Y: i32 = 42;
+pub const BTN_STEP: i32 = 152;
+pub const BTN_X0: i32 = 25;
 
-fn draw_slot(canvas: &mut Canvas, def: &ActionDef, base_dir: &Path, x: i32, w: u32) {
-    if def.states.is_empty() {
-        return;
-    }
-    let state = &def.states[0];
-    if let Some(img) = state.image.as_deref().and_then(|s| load_icon(base_dir, s)) {
-        canvas.draw_cover(&img, x + 2, 2, w - 4, 100);
-    }
-    if state.show_title {
-        if let Some(title) = state.title.as_deref() {
-            draw_text_rect(
-                canvas,
-                title,
-                &state.font_family,
-                state.font_size.min(18),
-                state.bold,
-                state.underline,
-                state.title_color,
-                TextAlign::Bottom,
-                2,
-                x,
-                0,
-                w as i32,
-                BAR_HEIGHT as i32,
-            );
-        }
-    }
-}
-
-/// Control Bar：条目 160px 一槽，可横向滚动
-pub fn render_control_bar(items: &[ActionDef], base_dir: &Path, scroll: i32) -> Result<Vec<u8>, String> {
+/// Control Bar：5 个可见按钮 + 横向滚动 + 两侧箭头
+pub fn render_control_bar(
+    items: &[ActionDef],
+    base_dir: &Path,
+    scroll: i32,
+    show_left: bool,
+    show_right: bool,
+) -> Result<Vec<u8>, String> {
     let mut canvas = Canvas::new_black(BAR_WIDTH, BAR_HEIGHT);
-    let slot = 160i32;
+    // 深色容器
+    canvas.fill_round_rect(8, 10, BAR_WIDTH - 16, BAR_HEIGHT - 20, 10, [26, 26, 26]);
+
     for (i, def) in items.iter().enumerate() {
-        let x = i as i32 * slot - scroll;
-        if x + slot <= 0 || x >= BAR_WIDTH as i32 {
+        let x = BTN_X0 + i as i32 * BTN_STEP - scroll;
+        // 只绘制完整可见的按钮，避免与两侧箭头重叠
+        if x < 20 || x + BTN_W as i32 > BAR_WIDTH as i32 - 20 {
             continue;
         }
-        draw_slot(&mut canvas, def, base_dir, x, slot as u32);
+        // 按钮底
+        canvas.fill_round_rect(x, BTN_Y, BTN_W, BTN_H, 10, [42, 42, 42]);
+        if let Some(state) = def.states.first() {
+            if let Some(img) = state.image.as_deref().and_then(|s| load_icon(base_dir, s)) {
+                canvas.draw_cover(&img, x, BTN_Y, BTN_W, BTN_H);
+            } else if let Some(title) = state.title.as_deref() {
+                draw_text_rect(
+                    &mut canvas,
+                    title,
+                    &state.font_family,
+                    16,
+                    state.bold,
+                    false,
+                    state.title_color,
+                    TextAlign::Middle,
+                    4,
+                    x,
+                    BTN_Y,
+                    BTN_W as i32,
+                    BTN_H as i32,
+                );
+            }
+        }
     }
-    canvas.rotate180();
+
+    if show_left {
+        draw_text_rect(
+            &mut canvas,
+            "◀",
+            "Microsoft YaHei",
+            22,
+            true,
+            false,
+            [200, 200, 200],
+            TextAlign::Middle,
+            0,
+            8,
+            0,
+            20,
+            BAR_HEIGHT as i32,
+        );
+    }
+    if show_right {
+        draw_text_rect(
+            &mut canvas,
+            "▶",
+            "Microsoft YaHei",
+            22,
+            true,
+            false,
+            [200, 200, 200],
+            TextAlign::Middle,
+            0,
+            BAR_WIDTH as i32 - 28,
+            0,
+            20,
+            BAR_HEIGHT as i32,
+        );
+    }
+
     canvas.encode_png()
 }
 
-/// 旋钮模式：4 个 200px 分区，取根配置 0,0~3,0
-pub fn render_knob_mode(actions: &BTreeMap<String, ActionDef>, base_dir: &Path) -> Result<Vec<u8>, String> {
-    let mut canvas = Canvas::new_black(BAR_WIDTH, BAR_HEIGHT);
-    let slot = 200u32;
-    for i in 0..4 {
-        let key = format!("{},0", i);
-        if let Some(def) = actions.get(&key) {
-            draw_slot(&mut canvas, def, base_dir, (i as u32 * slot) as i32, slot);
-        }
-    }
-    canvas.rotate180();
-    canvas.encode_png()
+/// 纯黑整条（切回旋钮模式时用于清除 Control Bar 残留）
+pub fn render_black_bar() -> Result<Vec<u8>, String> {
+    Canvas::new_black(BAR_WIDTH, BAR_HEIGHT).encode_png()
 }

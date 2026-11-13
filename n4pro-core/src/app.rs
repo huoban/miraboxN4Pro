@@ -5,6 +5,7 @@ use crate::config::{self, ActionDef, Scene};
 use crate::device::{input::InputEvent, protocol, HidDevice};
 use crate::render::key::{render_key, render_label};
 use crate::render::knob::render_knob;
+use crate::render::touchbar::{render_black_bar, render_control_bar, BTN_STEP};
 use crate::render::ImageCache;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -23,6 +24,8 @@ pub struct App {
     cache: ImageCache,
     knob_mode: bool,
     scroll: i32,
+    scroll_start: i32,
+    no_bgpic: bool,
     tx: Option<Sender<Vec<u8>>>,
     dump: Option<std::fs::File>,
     dry_run: bool,
@@ -48,6 +51,7 @@ impl App {
         probe: bool,
         log_input: bool,
         slot_test: bool,
+        no_bgpic: bool,
     ) -> Result<Self, String> {
         let scene = config::load_scene(&cfg.profile_dir)?;
         let knob_mode = cfg.knob_mode;
@@ -71,6 +75,8 @@ impl App {
             cache: ImageCache::default(),
             knob_mode,
             scroll: 0,
+            scroll_start: 0,
+            no_bgpic,
             tx: None,
             dump,
             dry_run,
@@ -311,18 +317,32 @@ impl App {
         }
     }
 
-    /// 整页刷新：与原厂实测一致（CLE → 10 键 BAT → 4 旋钮 BAT → SETLB → STP）
-    /// 注意：BGPIC 背景层在旋钮模式下原厂不发送，发送后会导致按键不显示，故此处不发送。
+    /// 整页刷新：CLE → 触摸条（Control Bar=BGPIC / 旋钮模式=黑条+槽位1~4）→ 10 键 BAT → SETLB → STP
     fn refresh_all(&mut self) {
-        let mut frames = Vec::new();
-        frames.push(protocol::cle());
-        // 先发触摸条 4 个区域，再发 10 个按键，避免键图被覆盖
-        for slot in 1u8..=4 {
-            match self.knob_png(slot) {
-                Ok(png) => frames.extend(protocol::bat_frames(&png, slot)),
-                Err(e) => crate::log_error!("触摸条区域 {} 渲染失败：{}", slot, e),
+        let mut frames = vec![protocol::cle()];
+
+        if self.knob_mode {
+            // 旋钮模式：先清整条，再发 4 个分区
+            if !self.no_bgpic {
+                if let Ok(black) = render_black_bar() {
+                    frames.extend(protocol::bgpic_frames(&black, 800, 130));
+                }
+            }
+            for slot in 1u8..=4 {
+                match self.knob_png(slot) {
+                    Ok(png) => frames.extend(protocol::bat_frames(&png, slot)),
+                    Err(e) => crate::log_error!("触摸条区域 {} 渲染失败：{}", slot, e),
+                }
+            }
+        } else if !self.no_bgpic {
+            // Control Bar：整条 BGPIC（5 按钮 + 箭头）
+            match self.bar_png() {
+                Ok(png) => frames.extend(protocol::bgpic_frames(&png, 800, 130)),
+                Err(e) => crate::log_error!("Control Bar 渲染失败：{}", e),
             }
         }
+
+        // 10 个物理按键（映射保持 slot = key + 5，不再改动）
         for key in 1u8..=10 {
             let slot = key_slot(key);
             let pos = key_pos(key);
@@ -333,19 +353,52 @@ impl App {
         }
         frames.push(protocol::setlb());
         frames.push(protocol::stp());
-        crate::log_info!("整页刷新完成，共 {} 帧", frames.len());
+        crate::log_info!(
+            "整页刷新完成，共 {} 帧（{}）",
+            frames.len(),
+            if self.knob_mode { "旋钮模式" } else { "Control Bar" }
+        );
         self.emit(frames);
     }
 
-    /// 旋钮图像（176×112）
+    /// Control Bar 最大滚动偏移
+    fn max_scroll(&self) -> i32 {
+        let content = self.scene.touchbar.len() as i32 * BTN_STEP;
+        (content - 775).max(0)
+    }
+
+    /// Control Bar 整条图像（800×130）
+    fn bar_png(&mut self) -> Result<Vec<u8>, String> {
+        let max = self.max_scroll();
+        let sig = format!(
+            "bar|{}|{}|{}",
+            self.scene.dir.display(),
+            self.scroll,
+            self.page_idx
+        );
+        if let Some(v) = self.cache.get(&sig) {
+            return Ok(v.clone());
+        }
+        let png = render_control_bar(
+            &self.scene.touchbar,
+            &self.scene.dir,
+            self.scroll,
+            self.scroll > 0,
+            self.scroll < max,
+        )?;
+        Ok(self.cache.put(sig, png))
+    }
+
+    /// 旋钮图像（176×112），页码用于翻页动作的内置图
     fn knob_png(&mut self, id: u8) -> Result<Vec<u8>, String> {
         let pos = format!("{},0", id.saturating_sub(1));
-        let sig = format!("{}|knob|{}", self.page_dir.display(), pos);
+        let page_number = (self.page_idx + 1).min(10) as u8;
+        let sig = format!("{}|knob|{}|{}", self.page_dir.display(), pos, page_number);
         if let Some(v) = self.cache.get(&sig) {
             return Ok(v.clone());
         }
         let action = self.actions.get(&pos).cloned();
-        let png = render_knob(action.as_ref(), &self.page_dir, 0)?;
+        let png = render_knob(action.as_ref(), &self.page_dir, 0, page_number)?;
         Ok(self.cache.put(sig, png))
     }
 
@@ -385,6 +438,7 @@ impl App {
                 self.touch_active = true;
                 self.touch_start = None;
                 self.touch_last = (0, 0);
+                self.scroll_start = self.scroll;
             }
             InputEvent::TouchMove { x, y } => {
                 if self.touch_active {
@@ -457,9 +511,18 @@ impl App {
             return;
         }
         let Some((sx, _)) = self.touch_start else { return };
-        let max_scroll = (self.scene.touchbar.len() as i32 * 160 - 800).max(0);
-        let offset = (sx - self.touch_last.0).clamp(0, max_scroll);
-        self.scroll = offset;
+        let max = self.max_scroll();
+        let offset = (self.scroll_start + (sx - self.touch_last.0)).clamp(0, max);
+        if offset != self.scroll {
+            self.scroll = offset;
+            // 跟手刷新（约 60ms 节流）
+            if self.last_bar_render.elapsed() > Duration::from_millis(60) && !self.no_bgpic {
+                self.last_bar_render = Instant::now();
+                if let Ok(png) = self.bar_png() {
+                    self.emit(protocol::bgpic_frames(&png, 800, 130));
+                }
+            }
+        }
     }
 
     fn finish_touch(&mut self) {
@@ -470,15 +533,30 @@ impl App {
         let Some((sx, sy)) = self.touch_start else { return };
         let dx = self.touch_last.0 - sx;
         let dy = self.touch_last.1 - sy;
+
+        if !self.knob_mode {
+            // Control Bar：横滑滚动按钮条，抬手吸附到 152px 网格
+            let max = self.max_scroll();
+            let snapped =
+                (((self.scroll as f64) / (BTN_STEP as f64)).round() as i32 * BTN_STEP).clamp(0, max);
+            if snapped != self.scroll {
+                self.scroll = snapped;
+                if !self.no_bgpic {
+                    if let Ok(png) = self.bar_png() {
+                        self.emit(protocol::bgpic_frames(&png, 800, 130));
+                    }
+                }
+            }
+            return;
+        }
+
         if dx.abs() > 60 && dy.abs() < 45 {
-            // 坐标方向与面板一致：x 增大表示向左滑
+            // 旋钮模式：坐标方向与面板一致，x 增大表示向左滑
             if dx > 0 {
                 self.switch_page(1);
             } else {
                 self.switch_page(-1);
             }
-        } else if dy.abs() > 35 && dx.abs() < 60 {
-            // 上下滑动由固件上报 0xB1/0xB2 处理，这里不再二次判定，避免重复切换
         }
     }
 

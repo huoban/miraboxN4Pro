@@ -35,6 +35,8 @@ fn main() {
     let probe = args.iter().any(|a| a == "--probe");
     let log_input = args.iter().any(|a| a == "--log-input");
     let slot_test = args.iter().any(|a| a == "--slot-test");
+    let no_bgpic = args.iter().any(|a| a == "--no-bgpic");
+    let mode = arg_value(&args, "--mode");
     let profile = arg_value(&args, "--profile").map(PathBuf::from);
 
     let log_path = logging::init(!serve);
@@ -67,7 +69,7 @@ fn main() {
         log_info!("试运行模式：动作只记录不执行");
     }
 
-    let cfg = match config::load(profile.as_deref()) {
+    let mut cfg = match config::load(profile.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             log_error!("{}", e);
@@ -77,6 +79,10 @@ fn main() {
             return;
         }
     };
+    if let Some(m) = mode {
+        cfg.knob_mode = !m.eq_ignore_ascii_case("bar");
+        log_info!("命令行覆盖触摸条模式：{}", if cfg.knob_mode { "旋钮" } else { "Control Bar" });
+    }
     log_info!(
         "设备：{}，序列号：{}，场景：{}",
         cfg.device,
@@ -90,7 +96,7 @@ fn main() {
         if cfg.knob_mode { "旋钮" } else { "Control Bar" }
     );
 
-    let mut app = match app::App::new(cfg, dry_run, dump_frames, no_device, once, probe, log_input, slot_test) {
+    let mut app = match app::App::new(cfg, dry_run, dump_frames, no_device, once, probe, log_input, slot_test, no_bgpic) {
         Ok(a) => a,
         Err(e) => {
             log_error!("初始化失败：{}", e);

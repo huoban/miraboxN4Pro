@@ -41,6 +41,41 @@ impl Canvas {
         self.blend(x, y, color);
     }
 
+    /// 填充矩形（不透明）
+    pub fn fill_rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: [u8; 3]) {
+        for yy in y..(y + h as i32) {
+            for xx in x..(x + w as i32) {
+                self.blend(xx, yy, [color[0], color[1], color[2], 255]);
+            }
+        }
+    }
+
+    /// 填充圆角矩形（半径 r）
+    pub fn fill_round_rect(&mut self, x: i32, y: i32, w: u32, h: u32, r: i32, color: [u8; 3]) {
+        let r = r.max(0);
+        for yy in 0..h as i32 {
+            for xx in 0..w as i32 {
+                let cx = if xx < r {
+                    r - xx
+                } else if xx >= w as i32 - r {
+                    xx - (w as i32 - r - 1)
+                } else {
+                    0
+                };
+                let cy = if yy < r {
+                    r - yy
+                } else if yy >= h as i32 - r {
+                    yy - (h as i32 - r - 1)
+                } else {
+                    0
+                };
+                if cx * cx + cy * cy <= r * r {
+                    self.blend(x + xx, y + yy, [color[0], color[1], color[2], 255]);
+                }
+            }
+        }
+    }
+
     /// 等比缩放并填满目标区域（裁剪居中）
     pub fn draw_cover(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
         if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
