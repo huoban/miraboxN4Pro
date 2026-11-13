@@ -82,7 +82,8 @@ unsafe fn refresh_edit() {
         for line in guard.iter() {
             s.push_str(line);
         }
-        s
+        // EDIT 控件只识别 CRLF 换行，纯 LF 会显示成一行
+        s.replace("\r\n", "\n").replace('\n', "\r\n")
     };
     let wide = to_wide(&text);
     SetWindowTextW(edit, wide.as_ptr());
