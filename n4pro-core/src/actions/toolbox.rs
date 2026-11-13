@@ -2,9 +2,9 @@
 // 官方设置键：Hotkeys、executionTimes、isCmd、appArguments、openShowState、
 // pastedText、isSendingEnter、useCopyAndPaste、forceOut
 
-use crate::actions::{s_bool, s_i64, s_str};
+use crate::actions::{hotkey, s_bool, s_i64, s_str};
 use crate::config::ActionDef;
-use crate::platform::win::{close_app, clipboard_set_text, key_press, key_press_scancode, run_hidden};
+use crate::platform::win::{close_app, clipboard_set_text, key_press, run_hidden};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -16,40 +16,10 @@ fn switch_map() -> &'static Mutex<HashMap<String, usize>> {
     SWITCH_STATE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn hotkey_entry_vk(entry: &Value) -> Option<u16> {
-    let vk = entry.get("VKeyCode").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if (1..=0xFF).contains(&vk) {
-        Some(vk as u16)
-    } else {
-        None
-    }
-}
-
-fn flag(entry: &Value, key: &str) -> bool {
-    entry.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
-}
-
-/// 执行一组热键（list 为 Hotkeys 数组）
-fn run_hotkey_list(list: &[Value], dry_run: bool, scan: bool) {
+/// 执行一组热键（list 为 Hotkeys 数组），统一走扫描码 + 左右修饰键
+fn run_hotkey_list(list: &[Value], dry_run: bool) {
     for entry in list {
-        let Some(vk) = hotkey_entry_vk(entry) else { continue };
-        let ctrl = flag(entry, "KeyCtrl");
-        let shift = flag(entry, "KeyShift");
-        let alt = flag(entry, "KeyAlt");
-        let win = flag(entry, "KeyCmd");
-        if dry_run {
-            crate::log_info!(
-                "[试运行] 热键 VK=0x{:02X} Ctrl={} Shift={} Alt={} Win={}（{}）",
-                vk, ctrl, shift, alt, win,
-                if scan { "扫描码" } else { "虚拟键" }
-            );
-            continue;
-        }
-        if scan {
-            key_press_scancode(vk, ctrl, shift, alt, win);
-        } else {
-            key_press(vk, ctrl, shift, alt, win);
-        }
+        hotkey::send_entry(entry, dry_run);
     }
 }
 
@@ -74,7 +44,7 @@ pub fn super_hotkey(settings: &Value, dry_run: bool) {
     };
     let times = s_i64(settings, &["executionTimes", "times"]).unwrap_or(1).clamp(1, 20);
     for _ in 0..times {
-        run_hotkey_list(list, dry_run, true);
+        run_hotkey_list(list, dry_run);
     }
 }
 
@@ -112,7 +82,7 @@ pub fn hotkey_switch(def: &ActionDef, dry_run: bool) {
         cur % groups.len()
     };
     crate::log_info!("Hotkey Switch 执行第 {}/{} 组", idx + 1, groups.len());
-    run_hotkey_list(&groups[idx], dry_run, false);
+    run_hotkey_list(&groups[idx], dry_run);
 }
 
 /// Text / Password：写入剪贴板并粘贴，可选回车

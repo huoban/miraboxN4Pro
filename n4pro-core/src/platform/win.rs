@@ -444,39 +444,122 @@ pub fn now_text() -> String {
     )
 }
 
-/// 发送一次键盘按键（含修饰键），flags 使用 KEYEVENTF_*
-pub fn key_press(vk: u16, ctrl: bool, shift: bool, alt: bool, win: bool) {
+/// 修饰键状态（区分左右）
+#[derive(Clone, Copy, Default)]
+pub struct Mods {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub win: bool,
+    pub r_ctrl: bool,
+    pub r_shift: bool,
+    pub r_alt: bool,
+    pub r_win: bool,
+}
+
+const VK_LSHIFT: u16 = 0xA0;
+const VK_RSHIFT: u16 = 0xA1;
+const VK_LCONTROL: u16 = 0xA2;
+const VK_RCONTROL: u16 = 0xA3;
+const VK_LMENU: u16 = 0xA4;
+const VK_RMENU: u16 = 0xA5;
+const VK_LWIN: u16 = 0x5B;
+const VK_RWIN: u16 = 0x5C;
+
+/// 需要扩展键标志的虚拟键
+fn is_extended_key(vk: u16) -> bool {
+    matches!(vk, 0x21..=0x2E | 0x5B..=0x5D | 0x6F | 0x90 | 0xA3 | 0xA5)
+}
+
+/// 以扫描码方式发送单键（按下/抬起），兼容游戏与普通窗口
+fn send_key_scan(vk: u16, up: bool) {
+    let scan = unsafe { MapVirtualKeyW(vk as u32, 0) } as u16;
+    let mut flags = KEYEVENTF_SCANCODE;
+    if is_extended_key(vk) {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        u: INPUT_U {
+            ki: KEYBDINPUT {
+                w_vk: 0,
+                w_scan: scan,
+                dw_flags: flags,
+                time: 0,
+                dw_extra_info: 0,
+            },
+        },
+    };
     unsafe {
-        if ctrl {
-            keybd_event(0x11, 0, 0, 0);
-        }
-        if shift {
-            keybd_event(0x10, 0, 0, 0);
-        }
-        if alt {
-            keybd_event(0x12, 0, 0, 0);
-        }
-        if win {
-            keybd_event(0x5B, 0, 0, 0);
-        }
-        // 扩展键（方向键/媒体键等）需要 EXTENDEDKEY
-        let extended = matches!(vk, 0x25..=0x28 | 0x21..=0x23 | 0x24 | 0x2D..=0x2E | 0xA6..=0xB7);
-        let flags = if extended { KEYEVENTF_EXTENDEDKEY } else { 0 };
-        keybd_event(vk as u8, 0, flags, 0);
-        keybd_event(vk as u8, 0, flags | KEYEVENTF_KEYUP, 0);
-        if win {
-            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if alt {
-            keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if shift {
-            keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if ctrl {
-            keybd_event(0x11, 0, KEYEVENTF_KEYUP, 0);
+        SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 发送组合键：左右修饰键 + 多个主键（同时按下后逆序释放）
+pub fn send_hotkey(vks: &[u16], mods: Mods) {
+    let mut modifier_vks: Vec<u16> = Vec::new();
+    if mods.ctrl {
+        modifier_vks.push(VK_LCONTROL);
+    }
+    if mods.r_ctrl {
+        modifier_vks.push(VK_RCONTROL);
+    }
+    if mods.shift {
+        modifier_vks.push(VK_LSHIFT);
+    }
+    if mods.r_shift {
+        modifier_vks.push(VK_RSHIFT);
+    }
+    if mods.alt {
+        modifier_vks.push(VK_LMENU);
+    }
+    if mods.r_alt {
+        modifier_vks.push(VK_RMENU);
+    }
+    if mods.win {
+        modifier_vks.push(VK_LWIN);
+    }
+    if mods.r_win {
+        modifier_vks.push(VK_RWIN);
+    }
+
+    for vk in &modifier_vks {
+        send_key_scan(*vk, false);
+        std::thread::sleep(std::time::Duration::from_millis(18));
+    }
+    for vk in vks {
+        if *vk != 0 {
+            send_key_scan(*vk, false);
+            std::thread::sleep(std::time::Duration::from_millis(15));
         }
     }
+    for vk in vks.iter().rev() {
+        if *vk != 0 {
+            send_key_scan(*vk, true);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+    }
+    for vk in modifier_vks.iter().rev() {
+        send_key_scan(*vk, true);
+        std::thread::sleep(std::time::Duration::from_millis(18));
+    }
+}
+
+/// 发送一次键盘按键（默认左修饰键）
+pub fn key_press(vk: u16, ctrl: bool, shift: bool, alt: bool, win: bool) {
+    send_hotkey(
+        &[vk],
+        Mods {
+            ctrl,
+            shift,
+            alt,
+            win,
+            ..Default::default()
+        },
+    );
 }
 
 /// 直接发送媒体/音量键（按下+抬起）
@@ -571,35 +654,8 @@ pub fn clipboard_set_text(text: &str) -> bool {
 
 /// 扫描码方式模拟按键（Super Hotkeys：更接近物理键盘）
 pub fn key_press_scancode(vk: u16, ctrl: bool, shift: bool, alt: bool, win: bool) {
-    let scan = unsafe { MapVirtualKeyW(vk as u32, 0) } as u8;
-    unsafe {
-        if ctrl {
-            keybd_event(0x11, 0, 0, 0);
-        }
-        if shift {
-            keybd_event(0x10, 0, 0, 0);
-        }
-        if alt {
-            keybd_event(0x12, 0, 0, 0);
-        }
-        if win {
-            keybd_event(0x5B, 0, 0, 0);
-        }
-        keybd_event(0, scan, KEYEVENTF_SCANCODE, 0);
-        keybd_event(0, scan, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0);
-        if win {
-            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if alt {
-            keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if shift {
-            keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0);
-        }
-        if ctrl {
-            keybd_event(0x11, 0, KEYEVENTF_KEYUP, 0);
-        }
-    }
+    // 统一使用扫描码实现（见 send_hotkey）
+    key_press(vk, ctrl, shift, alt, win);
 }
 
 /// 关闭指定路径对应的进程（force=true 强制结束）
