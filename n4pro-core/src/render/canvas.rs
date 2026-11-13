@@ -76,25 +76,6 @@ impl Canvas {
         }
     }
 
-    /// 等比缩放并填满目标区域（裁剪居中）
-    pub fn draw_cover(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
-        if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
-            return;
-        }
-        let scale = f64::max(dw as f64 / img.width() as f64, dh as f64 / img.height() as f64);
-        let nw = (img.width() as f64 * scale).round().max(1.0) as u32;
-        let nh = (img.height() as f64 * scale).round().max(1.0) as u32;
-        let resized = image::imageops::resize(img, nw, nh, image::imageops::FilterType::Triangle);
-        let ox = nw.saturating_sub(dw) / 2;
-        let oy = nh.saturating_sub(dh) / 2;
-        for y in 0..dh {
-            for x in 0..dw {
-                let p = resized.get_pixel(ox + x, oy + y);
-                self.blend(dx + x as i32, dy + y as i32, [p[0], p[1], p[2], p[3]]);
-            }
-        }
-    }
-
     /// 等比缩放并完整放入目标区域（居中，留黑边）
     pub fn draw_contain(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
         if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
@@ -109,6 +90,43 @@ impl Canvas {
         for y in 0..nh {
             for x in 0..nw {
                 let p = resized.get_pixel(x, y);
+                self.blend(ox + x as i32, oy + y as i32, [p[0], p[1], p[2], p[3]]);
+            }
+        }
+    }
+
+    /// 官方图标规则：等比完整放入目标区域并居中；
+    /// 原图宽高均未超过目标框时保持原尺寸（不放大），否则等比缩小
+    pub fn draw_fit(&mut self, img: &RgbaImage, dx: i32, dy: i32, dw: u32, dh: u32) {
+        if dw == 0 || dh == 0 || img.width() == 0 || img.height() == 0 {
+            return;
+        }
+        let (iw, ih) = (img.width(), img.height());
+        let (nw, nh) = if iw <= dw && ih <= dh {
+            (iw, ih)
+        } else {
+            let scale = f64::min(dw as f64 / iw as f64, dh as f64 / ih as f64);
+            (
+                (iw as f64 * scale).round().max(1.0) as u32,
+                (ih as f64 * scale).round().max(1.0) as u32,
+            )
+        };
+        let resized = if nw == iw && nh == ih {
+            None
+        } else {
+            Some(image::imageops::resize(
+                img,
+                nw,
+                nh,
+                image::imageops::FilterType::Triangle,
+            ))
+        };
+        let src = resized.as_ref().unwrap_or(img);
+        let ox = dx + ((dw.saturating_sub(nw)) / 2) as i32;
+        let oy = dy + ((dh.saturating_sub(nh)) / 2) as i32;
+        for y in 0..nh {
+            for x in 0..nw {
+                let p = src.get_pixel(x, y);
                 self.blend(ox + x as i32, oy + y as i32, [p[0], p[1], p[2], p[3]]);
             }
         }
@@ -145,5 +163,37 @@ impl Canvas {
             )
             .map_err(|e| format!("PNG 编码失败: {}", e))?;
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+
+    #[test]
+    fn 等比放入且小图不放大() {
+        // 176×112 → 112×71，垂直居中（上边距 20）
+        let mut canvas = Canvas::new_black(112, 112);
+        let img = RgbaImage::from_pixel(176, 112, Rgba([255, 0, 0, 255]));
+        canvas.draw_fit(&img, 0, 0, 112, 112);
+        let px = |x: u32, y: u32| {
+            let i = ((y * 112 + x) * 4) as usize;
+            [canvas.data[i], canvas.data[i + 1], canvas.data[i + 2]]
+        };
+        assert_eq!(px(56, 56), [255, 0, 0]);
+        assert_eq!(px(0, 0), [0, 0, 0]);
+        assert_eq!(px(56, 0), [0, 0, 0]);
+
+        // 10×20 小图保持原尺寸并居中
+        let small = RgbaImage::from_pixel(10, 20, Rgba([0, 255, 0, 255]));
+        let mut c2 = Canvas::new_black(112, 112);
+        c2.draw_fit(&small, 0, 0, 112, 112);
+        let px2 = |x: u32, y: u32| {
+            let i = ((y * 112 + x) * 4) as usize;
+            [c2.data[i], c2.data[i + 1], c2.data[i + 2]]
+        };
+        assert_eq!(px2(56, 56), [0, 255, 0]);
+        assert_eq!(px2(50, 45), [0, 0, 0]);
     }
 }

@@ -38,7 +38,7 @@ pub fn render_control_bar(
         canvas.fill_round_rect(x, BTN_Y, BTN_W, BTN_H, 10, [42, 42, 42]);
         if let Some(state) = def.states.first() {
             if let Some(img) = state.image.as_deref().and_then(|s| load_icon(base_dir, s)) {
-                canvas.draw_cover(&img, x, BTN_Y, BTN_W, BTN_H);
+                canvas.draw_fit(&img, x, BTN_Y, BTN_W, BTN_H);
             }
             // 文字层：官方编辑器在按钮图上叠加 States[].Title
             if state.show_title {

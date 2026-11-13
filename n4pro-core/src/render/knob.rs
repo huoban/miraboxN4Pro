@@ -93,7 +93,7 @@ pub fn render_knob(
                 .or_else(|| builtin_icon(def, page_number));
             let has_image = image.is_some();
             if let Some(img) = image {
-                canvas.draw_cover(&img, 0, 0, KNOB_WIDTH, KNOB_HEIGHT);
+                canvas.draw_fit(&img, 0, 0, KNOB_WIDTH, KNOB_HEIGHT);
             }
             // 有图时不再叠加默认标题（官方内置图已含文字），避免重复
             let title = if state.title.is_some() {

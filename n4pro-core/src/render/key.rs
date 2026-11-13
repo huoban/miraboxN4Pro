@@ -48,7 +48,7 @@ pub fn render_key(action: Option<&ActionDef>, base_dir: &Path, state_idx: usize)
         if !def.states.is_empty() {
             let state = &def.states[state_idx.min(def.states.len() - 1)];
             if let Some(img) = state.image.as_deref().and_then(|s| load_icon(base_dir, s)) {
-                canvas.draw_cover(&img, 0, 0, KEY_SIZE, KEY_SIZE);
+                canvas.draw_fit(&img, 0, 0, KEY_SIZE, KEY_SIZE);
             }
             if state.show_title {
                 if let Some(title) = state.title.as_deref() {
