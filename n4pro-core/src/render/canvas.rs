@@ -123,9 +123,11 @@ impl Canvas {
 
     pub fn encode_png(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
+        // 最高压缩：并行渲染已摊薄编码成本，换更小的分片数（更少 USB 帧）
+        // 实测（同一页面）：Fast 846 帧 / Default 376 帧 / Best 375 帧，Best 总耗时最短
         let encoder = image::codecs::png::PngEncoder::new_with_quality(
             &mut out,
-            image::codecs::png::CompressionType::Default,
+            image::codecs::png::CompressionType::Best,
             image::codecs::png::FilterType::NoFilter,
         );
         encoder
