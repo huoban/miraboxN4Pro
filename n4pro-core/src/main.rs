@@ -1,5 +1,7 @@
 // N4 Pro 重制版入口
-// 默认：控制台模式；-serve：静默后台（脱离控制台，仅写日志）
+// 默认：GUI 日志窗口 + 系统托盘；-serve：静默后台；--console：附加控制台调试
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
 mod app;
@@ -8,6 +10,7 @@ mod device;
 mod logging;
 mod platform;
 mod render;
+mod ui;
 
 use platform::win::*;
 use std::path::PathBuf;
@@ -39,12 +42,15 @@ fn main() {
     let no_bgpic = args.iter().any(|a| a == "--no-bgpic");
     let mode = arg_value(&args, "--mode");
     let profile = arg_value(&args, "--profile").map(PathBuf::from);
+    let console = args.iter().any(|a| a == "--console");
 
-    logging::init(!serve);
+    if console {
+        // 调试模式：附加父控制台或新建控制台
+        ui::attach_or_alloc_console();
+    }
+    logging::init(console);
     // 鼠标绝对坐标需要与官方一致的 DPI 感知
     set_dpi_aware();
-    // 控制台缓冲区固定 50 行：旧日志自动滚掉，不占内存
-    setup_console(50);
     // 崩溃信息写入日志，便于定位
     std::panic::set_hook(Box::new(|info| {
         crate::logging::error(format!("程序异常：{}", info));
@@ -58,8 +64,8 @@ fn main() {
     log_info!("项目地址：https://github.com/huoban/miraboxN4Pro");
     install_ctrl_handler();
     if !serve {
-        // 双击启动后隐藏到系统托盘；双击托盘图标恢复控制台
-        crate::platform::tray::setup();
+        // GUI 日志窗口默认隐藏，仅显示托盘图标；双击托盘恢复
+        ui::start(false);
     }
 
     // 单实例互斥，避免双开抢占 HID；关窗重启时等待旧实例退出

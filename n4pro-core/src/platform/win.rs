@@ -789,9 +789,8 @@ extern "system" {
     pub fn GetModuleHandleW(name: *const u16) -> HANDLE;
 }
 
-// ---------------- 控制台与系统托盘 ----------------
+// ---------------- 系统托盘与窗口 ----------------
 
-pub const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5;
 pub const SW_RESTORE: i32 = 9;
 pub const WM_APP: u32 = 0x8000;
 pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
@@ -804,32 +803,6 @@ pub const NIM_ADD: u32 = 0x0000_0000;
 pub const NIM_DELETE: u32 = 0x0000_0002;
 pub const TPM_RIGHTBUTTON: u32 = 0x0002;
 pub const TPM_RETURNCMD: u32 = 0x0100;
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct COORD {
-    pub x: i16,
-    pub y: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct SMALL_RECT {
-    pub left: i16,
-    pub top: i16,
-    pub right: i16,
-    pub bottom: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct CONSOLE_SCREEN_BUFFER_INFO {
-    pub size: COORD,
-    pub cursor_position: COORD,
-    pub attributes: u16,
-    pub window: SMALL_RECT,
-    pub maximum_window_size: COORD,
-}
 
 #[repr(C)]
 pub struct NOTIFYICONDATAW {
@@ -850,17 +823,8 @@ pub struct NOTIFYICONDATAW {
     pub h_balloon_icon: HANDLE,
 }
 
-#[link(name = "kernel32")]
-extern "system" {
-    pub fn GetStdHandle(kind: u32) -> HANDLE;
-    pub fn GetConsoleScreenBufferInfo(h: HANDLE, info: *mut CONSOLE_SCREEN_BUFFER_INFO) -> BOOL;
-    pub fn SetConsoleScreenBufferSize(h: HANDLE, size: COORD) -> BOOL;
-    pub fn SetConsoleWindowInfo(h: HANDLE, absolute: BOOL, rect: *const SMALL_RECT) -> BOOL;
-}
-
 #[link(name = "user32")]
 extern "system" {
-    pub fn IsIconic(hwnd: HWND) -> BOOL;
     pub fn SetForegroundWindow(hwnd: HWND) -> BOOL;
     pub fn LoadIconW(instance: HANDLE, name: *const u16) -> HANDLE;
     pub fn Shell_NotifyIconW(op: u32, data: *mut NOTIFYICONDATAW) -> BOOL;
@@ -880,46 +844,6 @@ extern "system" {
     pub fn SetTimer(hwnd: HWND, id: usize, ms: u32, proc: usize) -> usize;
     pub fn KillTimer(hwnd: HWND, id: usize) -> BOOL;
     pub fn GetMessageW(msg: *mut MSG, hwnd: HWND, min: u32, max: u32) -> BOOL;
-}
-
-/// 控制台缓冲区高度固定为指定行数（旧日志自动滚掉）
-pub fn setup_console(height: i16) {
-    unsafe {
-        let h = GetStdHandle(STD_OUTPUT_HANDLE);
-        if h == 0 || h == INVALID_HANDLE_VALUE {
-            return;
-        }
-        let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
-        if GetConsoleScreenBufferInfo(h, &mut info) == 0 {
-            return;
-        }
-        let width = info.size.x.max(80);
-        let window_height = info.window.bottom - info.window.top + 1;
-        // 先把窗口高度收进目标缓冲区，再设置缓冲区高度
-        if window_height > height {
-            let rect = SMALL_RECT {
-                left: 0,
-                top: 0,
-                right: width - 1,
-                bottom: height - 1,
-            };
-            SetConsoleWindowInfo(h, 1, &rect);
-        }
-        SetConsoleScreenBufferSize(
-            h,
-            COORD {
-                x: width,
-                y: height,
-            },
-        );
-        let rect = SMALL_RECT {
-            left: 0,
-            top: 0,
-            right: width - 1,
-            bottom: height - 1,
-        };
-        SetConsoleWindowInfo(h, 1, &rect);
-    }
 }
 
 /// ShellExecuteW 打开路径/网址
@@ -976,24 +900,10 @@ extern "system" {
 }
 
 /// 控制台关闭/ Ctrl+C 回调
-extern "system" fn ctrl_handler(ctrl_type: u32) -> BOOL {
-    match ctrl_type {
-        0 | 1 => {
-            // Ctrl+C / Ctrl+Break：收进托盘，不退出（只有托盘“退出”才真正结束）
-            crate::platform::tray::hide_main_console();
-            1
-        }
-        2 => {
-            // 关闭控制台窗口：发送结束帧并重启到托盘
-            crate::app::send_exit_frame_from_handler();
-            crate::platform::tray::relaunch_hidden();
-            1
-        }
-        _ => {
-            crate::app::send_exit_frame_from_handler();
-            1
-        }
-    }
+extern "system" fn ctrl_handler(_ctrl_type: u32) -> BOOL {
+    // 仅 --console 调试模式会触发；发送结束帧后正常退出
+    crate::app::send_exit_frame_from_handler();
+    0
 }
 
 /// 安装控制台退出回调，保证关闭窗口前向设备发送结束信号

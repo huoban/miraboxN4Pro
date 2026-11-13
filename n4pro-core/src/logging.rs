@@ -1,15 +1,22 @@
-// 日志模块：仅控制台输出（独立线程 + 有界队列），不写文件
-// 控制台缓冲区由 win::setup_console 固定为 50 行，旧日志自动滚掉
+// 日志模块：内存环形日志（固定 50 行）+ 可选控制台镜像 + 推送到日志窗口
+// GUI 模式无控制台；--console 时才输出到控制台
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-/// 控制台待输出队列上限：写满直接丢弃，保证业务线程永不阻塞
+const MAX_LINES: usize = 50;
 const CONSOLE_QUEUE: usize = 256;
 
 static CONSOLE_TX: Mutex<Option<SyncSender<String>>> = Mutex::new(None);
+static UI_TX: Mutex<Option<SyncSender<String>>> = Mutex::new(None);
+static HISTORY: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
-/// 初始化控制台日志；console=false（-serve）时不输出任何日志
+fn history() -> &'static Mutex<VecDeque<String>> {
+    HISTORY.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// 初始化日志；console=true 时同步输出到控制台（--console）
 pub fn init(console: bool) {
     if !console {
         return;
@@ -25,10 +32,36 @@ pub fn init(console: bool) {
     }
 }
 
+/// 注册日志窗口输出端（由 ui 模块调用）
+pub fn set_ui_sender(tx: SyncSender<String>) {
+    if let Ok(mut guard) = UI_TX.lock() {
+        *guard = Some(tx);
+    }
+}
+
+/// 取当前历史日志（窗口创建时装载）
+pub fn history_snapshot() -> Vec<String> {
+    history()
+        .lock()
+        .map(|guard| guard.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
 fn write_line(level: &str, msg: &str) {
     let line = format!("[{}] {} {}\n", crate::platform::win::now_text(), level, msg);
-    // 只入队，不直接写控制台：队列满即丢弃，避免控制台选中文本/管道堵塞卡住业务线程
+
+    if let Ok(mut guard) = history().lock() {
+        guard.push_back(line.clone());
+        while guard.len() > MAX_LINES {
+            guard.pop_front();
+        }
+    }
     if let Ok(guard) = CONSOLE_TX.lock() {
+        if let Some(tx) = guard.as_ref() {
+            let _ = tx.try_send(line.clone());
+        }
+    }
+    if let Ok(guard) = UI_TX.lock() {
         if let Some(tx) = guard.as_ref() {
             let _ = tx.try_send(line);
         }
