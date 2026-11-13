@@ -78,6 +78,8 @@ fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
 pub struct App {
     cfg: config::AppConfig,
     scene: Scene,
+    /// 当前设备可用的场景列表（已按设备过滤并排序）
+    scene_list: Vec<PathBuf>,
     page_dir: PathBuf,
     page_idx: usize,
     actions: BTreeMap<String, ActionDef>,
@@ -131,6 +133,7 @@ impl App {
         let mut app = App {
             cfg,
             scene,
+            scene_list: Vec::new(),
             page_dir: PathBuf::new(),
             page_idx: 0,
             actions: BTreeMap::new(),
@@ -156,6 +159,9 @@ impl App {
         };
         app.resolve_current_page();
         app.load_current_page();
+        // 官方 Scene Shift 只轮换当前设备的场景（manifest DeviceUUID/序列号匹配）
+        app.scene_list = build_scene_list(&app.cfg, &app.scene);
+        crate::log_info!("可用场景：{} 个（按设备过滤）", app.scene_list.len());
         // 官方把触摸条滚动位置存在 Settings.widgetCurrX（负值），启动时恢复
         let max = app.max_scroll();
         app.scroll = (-app.scene.touchbar_curr_x).clamp(0, max);
@@ -719,32 +725,22 @@ impl App {
         }
     }
 
-    /// 循环切换场景目录（*.sdProfile），dir=1 下一个、-1 上一个
+    /// 循环切换本设备可用的场景，dir=1 下一个、-1 上一个
     fn cycle_scene(&mut self, dir: i8) {
-        let Some(parent) = self.cfg.profile_dir.parent().map(|p| p.to_path_buf()) else {
-            return;
-        };
-        let Ok(rd) = std::fs::read_dir(&parent) else { return };
-        let mut scenes: Vec<PathBuf> = rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.is_dir()
-                    && p.extension()
-                        .map(|x| x.eq_ignore_ascii_case("sdProfile"))
-                        .unwrap_or(false)
-            })
-            .collect();
-        if scenes.is_empty() {
+        if self.scene_list.len() <= 1 {
+            crate::log_info!("没有其他可用场景（{} 个），忽略切换", self.scene_list.len());
             return;
         }
-        scenes.sort();
-        let cur = scenes
+        let cur = self
+            .scene_list
             .iter()
             .position(|p| p == &self.cfg.profile_dir)
             .unwrap_or(0) as i32;
-        let next = (cur + dir as i32).rem_euclid(scenes.len() as i32) as usize;
-        let path = scenes[next].clone();
+        let next = (cur + dir as i32).rem_euclid(self.scene_list.len() as i32) as usize;
+        if next as i32 == cur {
+            return;
+        }
+        let path = self.scene_list[next].clone();
         match config::load_scene(&path) {
             Ok(scene) => {
                 self.scene = scene;
@@ -926,6 +922,63 @@ impl App {
             Err(e) => crate::log_error!("切换场景失败：{}", e),
         }
     }
+}
+
+/// 构建当前设备可用场景列表：按 manifest 的 DeviceUUID/序列号过滤，按创建时间排序
+fn build_scene_list(cfg: &config::AppConfig, current: &Scene) -> Vec<PathBuf> {
+    let Some(parent) = cfg.profile_dir.parent() else {
+        return vec![current.dir.clone()];
+    };
+    let Ok(rd) = std::fs::read_dir(parent) else {
+        return vec![current.dir.clone()];
+    };
+    let mut items: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path
+            .extension()
+            .map(|x| x.eq_ignore_ascii_case("sdProfile"))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path.join("manifest.json")) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let dev = json
+            .get("DeviceUUID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let sn = json
+            .get("DeviceSerialNumber")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        // 设备必须匹配；旧配置没有 DeviceUUID 时兼容纳入
+        let mut ok = dev.is_empty() || dev.eq_ignore_ascii_case(&cfg.device);
+        if ok && !sn.is_empty() && !cfg.serial.is_empty() {
+            ok = sn.eq_ignore_ascii_case(&cfg.serial);
+        }
+        if !ok {
+            continue;
+        }
+        let time = entry
+            .metadata()
+            .and_then(|m| m.created().or_else(|_| m.modified()))
+            .unwrap_or(std::time::UNIX_EPOCH);
+        items.push((time, path));
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut list: Vec<PathBuf> = items.into_iter().map(|(_, p)| p).collect();
+    if !list.iter().any(|p| p == &current.dir) {
+        list.push(current.dir.clone());
+    }
+    list
 }
 
 /// 按键编号（1..10）→ 配置位置（图像渲染用：上排 y1、下排 y2）

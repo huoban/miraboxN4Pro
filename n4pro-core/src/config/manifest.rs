@@ -68,6 +68,10 @@ pub struct Scene {
     pub touchbar: Vec<ActionDef>,
     /// 触摸条滚动偏移（官方 Settings.widgetCurrX，通常为负值）
     pub touchbar_curr_x: i32,
+    /// 场景所属设备（manifest DeviceUUID）
+    pub device_uuid: String,
+    /// 场景所属设备序列号（manifest DeviceSerialNumber）
+    pub device_serial: String,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +82,10 @@ struct RawManifest {
     pages: Option<RawPages>,
     #[serde(rename = "Actions", default)]
     actions: BTreeMap<String, Value>,
+    #[serde(rename = "DeviceUUID", default)]
+    device_uuid: String,
+    #[serde(rename = "DeviceSerialNumber", default)]
+    device_serial: String,
 }
 
 #[derive(Deserialize)]
@@ -198,6 +206,8 @@ pub fn load_scene(dir: &Path) -> Result<Scene, String> {
         root_actions,
         touchbar,
         touchbar_curr_x,
+        device_uuid: raw.device_uuid,
+        device_serial: raw.device_serial,
     })
 }
 
