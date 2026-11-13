@@ -12,6 +12,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -26,9 +27,15 @@ enum WriteMsg {
 /// 退出信号句柄：供控制台 Ctrl+C/关窗回调直接写结束帧
 static EXIT_DEV: OnceLock<Arc<HidDevice>> = OnceLock::new();
 
-/// 控制台退出回调：直接同步写 CLE+DC 帧，避免排队导致关窗时发不出去
+/// 退出标记：置位后写线程停止发送图像帧，保证结束帧是最后一帧
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+/// 控制台退出回调：先停写线程，再直接同步写 CLE+DC 帧，避免传输中途断开
 pub fn send_exit_frame_from_handler() {
     if let Some(dev) = EXIT_DEV.get() {
+        EXITING.store(true, Ordering::Relaxed);
+        // 等待当前帧写完，避免中断图像传输
+        std::thread::sleep(Duration::from_millis(100));
         match dev.write_frame(&protocol::exit_frames()) {
             Ok(()) => crate::log_info!("已发送退出信号（CLE+DC）"),
             Err(e) => crate::log_warn!("退出信号发送失败：{}", e),
@@ -41,6 +48,9 @@ pub fn send_exit_frame_from_handler() {
 /// 逐帧写入设备，并对图像头/结束帧做少量节流
 fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
     for frame in frames {
+        if EXITING.load(Ordering::Relaxed) {
+            return;
+        }
         if let Err(e) = dev.write_frame(frame) {
             crate::log_error!("{}", e);
             std::thread::sleep(Duration::from_millis(200));
@@ -278,6 +288,7 @@ impl App {
                     protocol::lig(self.cfg.brightness),
                 ]);
                 std::thread::sleep(Duration::from_millis(600));
+                send_exit_frame_from_handler();
                 return;
             }
 
@@ -333,6 +344,7 @@ impl App {
                 }
             }
             crate::log_info!("--once：完成一次整页刷新后退出");
+            send_exit_frame_from_handler();
             return;
         }
 
