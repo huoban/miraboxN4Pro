@@ -1,0 +1,150 @@
+// N4 Pro 重制版入口
+// 默认：GUI 日志窗口 + 系统托盘；-serve：静默后台；--console：附加控制台调试
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod actions;
+mod app;
+mod config;
+mod device;
+mod logging;
+mod platform;
+mod render;
+mod ui;
+
+use platform::win::*;
+use std::path::PathBuf;
+use std::time::Duration;
+
+fn arg_value(args: &[String], name: &str) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == name {
+            return it.next().cloned();
+        }
+        if let Some(rest) = a.strip_prefix(&format!("{}=", name)) {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let serve = args.iter().any(|a| a.eq_ignore_ascii_case("-serve"));
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let dump_frames = args.iter().any(|a| a == "--dump-frames");
+    let no_device = args.iter().any(|a| a == "--no-device");
+    let once = args.iter().any(|a| a == "--once");
+    let probe = args.iter().any(|a| a == "--probe");
+    let log_input = args.iter().any(|a| a == "--log-input");
+    let slot_test = args.iter().any(|a| a == "--slot-test");
+    let no_bgpic = args.iter().any(|a| a == "--no-bgpic");
+    let mode = arg_value(&args, "--mode");
+    let profile = arg_value(&args, "--profile").map(PathBuf::from);
+    let console = args.iter().any(|a| a == "--console");
+
+    if console {
+        // 调试模式：附加父控制台或新建控制台
+        ui::attach_or_alloc_console();
+    }
+    logging::init(console);
+    // 鼠标绝对坐标需要与官方一致的 DPI 感知
+    set_dpi_aware();
+    // 崩溃信息写入日志，便于定位
+    std::panic::set_hook(Box::new(|info| {
+        crate::logging::error(format!("程序异常：{}", info));
+    }));
+    if serve {
+        detach_console();
+    }
+
+    log_info!("N4ProCore 启动，版本 {}", env!("CARGO_PKG_VERSION"));
+    log_info!("服务版启动参数：n4pro-core.exe -serve（静默后台，无控制台）");
+    log_info!("项目地址：https://github.com/huoban/miraboxN4Pro");
+    install_ctrl_handler();
+    if !serve {
+        // GUI 日志窗口默认隐藏，仅显示托盘图标；双击托盘恢复
+        ui::start(false);
+    }
+
+    // 单实例互斥，避免双开抢占 HID；关窗重启时等待旧实例退出
+    let mutex_name = to_wide("Local\\N4ProCore_SingleInstance");
+    let mut mutex: HANDLE = 0;
+    let mut acquired = false;
+    for attempt in 0..20 {
+        let h = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
+        let err = unsafe { GetLastError() };
+        if h == 0 {
+            log_warn!("单实例互斥创建失败，错误码 {}", err);
+            break;
+        }
+        if err != ERROR_ALREADY_EXISTS {
+            mutex = h;
+            acquired = true;
+            break;
+        }
+        if attempt == 0 {
+            log_info!("已有实例在运行，等待其退出…");
+        }
+        unsafe {
+            CloseHandle(h);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    if !acquired {
+        log_warn!("已有实例在运行，本次退出");
+        if !serve {
+            println!("已有实例在运行，本次退出");
+        }
+        return;
+    }
+    let _mutex = mutex;
+
+    if serve {
+        log_info!("静默后台模式");
+    }
+    if dry_run {
+        log_info!("试运行模式：动作只记录不执行");
+    }
+
+    let mut cfg = match config::load(profile.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            log_error!("{}", e);
+            if !serve {
+                eprintln!("配置加载失败：{}", e);
+            }
+            return;
+        }
+    };
+    if let Some(m) = mode {
+        cfg.knob_mode = !m.eq_ignore_ascii_case("bar");
+        log_info!("命令行覆盖触摸条模式：{}", if cfg.knob_mode { "旋钮" } else { "Control Bar" });
+    }
+    log_info!(
+        "设备：{}，序列号：{}，场景：{}",
+        cfg.device,
+        cfg.serial,
+        cfg.profile_dir.display()
+    );
+    log_info!(
+        "亮度：{}，旋转：{}，触摸条模式：{}",
+        cfg.brightness,
+        cfg.rotation,
+        if cfg.knob_mode { "旋钮" } else { "Control Bar" }
+    );
+
+    let mut app = match app::App::new(cfg, dry_run, dump_frames, no_device, once, probe, log_input, slot_test, no_bgpic) {
+        Ok(a) => a,
+        Err(e) => {
+            log_error!("初始化失败：{}", e);
+            if !serve {
+                eprintln!("初始化失败：{}", e);
+            }
+            return;
+        }
+    };
+    app.run();
+    log_info!("N4ProCore 退出");
+}

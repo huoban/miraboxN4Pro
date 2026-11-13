@@ -1,0 +1,1170 @@
+{
+    "Actions": {
+        "-1,-1": {
+            "ActionID": "47e1v44u-t4nt-11k1-4fv6-3uiitdo503zi",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 117,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "Images/btn_custom_trigger_hotkey",
+                    "ShowTitle": true,
+                    "Title": "奇迹出发",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "0,0": {
+            "ActionID": "9qcf54sj3811b302mqu26ewzy7153jp8",
+            "Controller": "Knob",
+            "Name": "Scene Shift",
+            "Settings": {
+                "DeviceUUID": "",
+                "ProfileUUID": ""
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 22,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "",
+                    "ShowTitle": true,
+                    "Title": "切换场景",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.profile.rotate"
+        },
+        "0,1": {
+            "ActionID": "4h36of87-g0ur-2372-449m-1047pr166b56",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": true,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 77,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "DL7XOBJNYS9LXA0T6HXMIH96Y4F.png",
+                    "ShowTitle": true,
+                    "Title": "查看车位",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "0,2": {
+            "ActionID": "x8221pb6-g0l7-2gnw-fv2k-28hjq4i22ij7",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 119,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "3S0P0V0352O8C7P5DE6T2U516J4.png",
+                    "ShowTitle": true,
+                    "Title": "买骰子",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "1,0": {
+            "ActionID": "7oyzbtm7-6wye-hgth-vp03-r1l4ayix47cx",
+            "Controller": "Knob",
+            "Name": "Multimedia",
+            "Settings": {
+                "actionIdx": 22
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "Image": ""
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.multimedia"
+        },
+        "1,1": {
+            "ActionID": "u7209t3e-y334-3p17-jqx2-6o3a7vw1383b",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": true,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 115,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "91G6DJ39O9M0WC3001V4PO1B82B.png",
+                    "ShowTitle": true,
+                    "Title": "彩摊续时",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "1,2": {
+            "ActionID": "6pe8x773-me4u-9c59-927d-7h28uq3f7tll",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": true,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 38,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "5R539KYUE47L8LI32343R7X4VOH.png",
+                    "ShowTitle": true,
+                    "Title": "学习机",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "2,0": {
+            "ActionID": "72r2z7tkm4163pl5e1afmdsa00973sa7",
+            "Controller": "Knob",
+            "Name": "SystemVolume",
+            "Settings": {
+                "actionIdx": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 22,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "Z5W9J0JG65P0078MS43BR48DFMU.png",
+                    "ShowTitle": true,
+                    "Title": "音量",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.volume"
+        },
+        "2,2": {
+            "ActionID": "802g907v-5532-5ee1-h6o6-1j44wc8xnn0m",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": true,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 113,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "30WH91M338QCVN18T802H56CMMD.png",
+                    "ShowTitle": true,
+                    "Title": "拼豆任务",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "3,0": {
+            "ActionID": "0qw4s149-bwp4-a9oh-0j2r-23t4y66i73se",
+            "Controller": "Knob",
+            "Name": "change page",
+            "Settings": {
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 22,
+                    "FontStyle": "",
+                    "FontUnderline": false,
+                    "Image": "",
+                    "ShowTitle": true,
+                    "Title": "◀  翻页 ▶",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.page.change"
+        },
+        "3,2": {
+            "ActionID": "h269k4yp-94f1-qoxg-83n3-kmq7kcoadf7d",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": true,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 117,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "CXVJKKSUTTUNJGR11TE25U7BE2D.png",
+                    "ShowTitle": true,
+                    "Title": "普果喇叭",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "4,1": {
+            "ActionID": "ymwrj72q-gtf2-nh6n-xaow-p432w7a2p4k2",
+            "Controller": "Keypad",
+            "Name": "Open",
+            "Settings": {
+                "openShowState": false,
+                "path": "C:/Users/huoban/Desktop/play.bat"
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 42,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "JRRUO54XEB18QRQF4N2ZHHJKS7B.png",
+                    "ShowTitle": true,
+                    "Title": "多开",
+                    "TitleAlignment": "middle",
+                    "TitleColor": "#ff0000"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.open"
+        },
+        "4,2": {
+            "ActionID": "b40pa9pr-nfm3-bjhe-rn44-ooq4j88fnoc3",
+            "Controller": "Keypad",
+            "Name": "Hotkey",
+            "Settings": {
+                "Coalesce": true,
+                "Hotkeys": [
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": true,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": true,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": 120,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    },
+                    {
+                        "KeyCmd": false,
+                        "KeyCtrl": false,
+                        "KeyModifiers": 65536,
+                        "KeyOption": false,
+                        "KeyShift": false,
+                        "NativeCode": -1,
+                        "QTKeyCode": -1,
+                        "RKeyCmd": false,
+                        "RKeyCtrl": false,
+                        "RKeyOption": false,
+                        "RKeyShift": false,
+                        "VKeyCode": -1,
+                        "VKeyCodes": [
+                        ]
+                    }
+                ],
+                "hotkeyRadioButtonIndex": 0
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+                {
+                    "FontFamily": "HarmonyOS Sans",
+                    "FontSize": 20,
+                    "FontStyle": "Bold",
+                    "FontUnderline": false,
+                    "Image": "A948ZMER2U81KNL48F5X8P21I4O.png",
+                    "ShowTitle": true,
+                    "Title": "炫彩喇叭",
+                    "TitleAlignment": "top",
+                    "TitleColor": "#ffff00"
+                }
+            ],
+            "UUID": "com.hotspot.streamdock.system.hotkey"
+        },
+        "touchbar": {
+            "ActionID": "",
+            "Actions": [
+                {
+                    "ActionID": "1k04m03p-jdjo-lw30-b911-98mo3c37644f",
+                    "Controller": "Keypad",
+                    "Name": "Open",
+                    "Settings": {
+                        "path": "C:/G-Menu/resources/bin/aoc-switch.exe"
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 11,
+                            "FontStyle": "",
+                            "FontUnderline": false,
+                            "Image": "NDL4F81O7Q80O3ALO88U0SS2SY0.png",
+                            "ShowTitle": true,
+                            "Title": "奇迹农场",
+                            "TitleAlignment": "middle",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.open"
+                },
+                {
+                    "ActionID": "sj16c3318q731wcm33359l57w2d2314z",
+                    "Controller": "Keypad",
+                    "Name": "Hotkey",
+                    "Settings": {
+                        "Coalesce": true,
+                        "Hotkeys": [
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": true,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": true,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": 187,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            }
+                        ],
+                        "hotkeyRadioButtonIndex": 0
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 20,
+                            "FontStyle": "Bold",
+                            "FontUnderline": false,
+                            "Image": "5ZAU4SG93ABWL97LJ77D4N14883.png",
+                            "ShowTitle": true,
+                            "Title": "奇迹农场",
+                            "TitleAlignment": "top",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.hotkey"
+                },
+                {
+                    "ActionID": "z0q1ubikfrt4g7y1lx456jz01zec16zv",
+                    "Controller": "Keypad",
+                    "Name": "Hotkey",
+                    "Settings": {
+                        "Coalesce": true,
+                        "Hotkeys": [
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": true,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": true,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": 118,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            }
+                        ],
+                        "hotkeyRadioButtonIndex": 0
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 20,
+                            "FontStyle": "Bold",
+                            "FontUnderline": false,
+                            "Image": "Y9NRID26ODG86G5807F63UJ2CXB.png",
+                            "ShowTitle": true,
+                            "Title": "奇迹农场",
+                            "TitleAlignment": "top",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.hotkey"
+                },
+                {
+                    "ActionID": "3255s1a3a61bfw0w245xbx34ugrv0dq0",
+                    "Controller": "Keypad",
+                    "Name": "Hotkey",
+                    "Settings": {
+                        "Coalesce": true,
+                        "Hotkeys": [
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": true,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": true,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": 116,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            }
+                        ],
+                        "hotkeyRadioButtonIndex": 0
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 20,
+                            "FontStyle": "Bold",
+                            "FontUnderline": false,
+                            "Image": "48214O5Q454526471BD37JG59HW.png",
+                            "ShowTitle": true,
+                            "Title": "奇迹农场",
+                            "TitleAlignment": "top",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.hotkey"
+                },
+                {
+                    "ActionID": "47e1v44ut4nt11k14fv63uiitdo503zi",
+                    "Controller": "Keypad",
+                    "Name": "Hotkey",
+                    "Settings": {
+                        "Coalesce": true,
+                        "Hotkeys": [
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": true,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": true,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": 117,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            }
+                        ],
+                        "hotkeyRadioButtonIndex": 0
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 20,
+                            "FontStyle": "Bold",
+                            "FontUnderline": false,
+                            "Image": "06H4MRM2S0FT80OZ69179V5HL7J.png",
+                            "ShowTitle": true,
+                            "Title": "奇迹农场",
+                            "TitleAlignment": "top",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.hotkey"
+                },
+                {
+                    "ActionID": "zz9363192mv0xsv3453m82212hk0udk5",
+                    "Controller": "Keypad",
+                    "Name": "Hotkey",
+                    "Settings": {
+                        "Coalesce": true,
+                        "Hotkeys": [
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": true,
+                                "KeyModifiers": 65536,
+                                "KeyOption": true,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": 40,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            },
+                            {
+                                "KeyCmd": false,
+                                "KeyCtrl": false,
+                                "KeyModifiers": 65536,
+                                "KeyOption": false,
+                                "KeyShift": false,
+                                "NativeCode": -1,
+                                "QTKeyCode": -1,
+                                "RKeyCmd": false,
+                                "RKeyCtrl": false,
+                                "RKeyOption": false,
+                                "RKeyShift": false,
+                                "VKeyCode": -1,
+                                "VKeyCodes": [
+                                ]
+                            }
+                        ],
+                        "hotkeyRadioButtonIndex": 0
+                    },
+                    "SoftwareSettings": {
+                    },
+                    "State": 0,
+                    "States": [
+                        {
+                            "FontFamily": "HarmonyOS Sans",
+                            "FontSize": 20,
+                            "FontStyle": "",
+                            "FontUnderline": false,
+                            "Image": "HI2SMRB70XS3E55N99QPW2Z488E.png",
+                            "ShowTitle": true,
+                            "Title": "小车复位",
+                            "TitleAlignment": "top",
+                            "TitleColor": "#ffff00"
+                        }
+                    ],
+                    "UUID": "com.hotspot.streamdock.system.hotkey"
+                }
+            ],
+            "Controller": "",
+            "Name": "",
+            "Settings": {
+                "touchbarBackgroundImageName": -5,
+                "widgetCurrX": -6
+            },
+            "SoftwareSettings": {
+            },
+            "State": 0,
+            "States": [
+            ],
+            "UUID": "touchbar"
+        }
+    },
+    "AppIdentifier": "",
+    "AppIdentifier0": "",
+    "AppIdentifier1": "",
+    "AppIdentifier2": "",
+    "DeviceModel": "20GBA9901",
+    "DeviceSerialNumber": "49490078391A",
+    "DeviceUUID": "N4Pro",
+    "Name": "游戏",
+    "Pages": {
+        "Current": "1JH7D037-N4NO-2974-YN37-ZHEOMJ8S2Y68.sdProfile",
+        "Pages": [
+            "Q5CYD4F3-9ODO-H32Q-86H8-D76LYH700LK9.sdProfile",
+            "1JH7D037-N4NO-2974-YN37-ZHEOMJ8S2Y68.sdProfile",
+            "456AXNQI-J9YD-V2GQ-Y4WV-1FCOB43037M7.sdProfile",
+            "I0BX065Q-11N5-0X7U-ZV63-39E515R13224.sdProfile"
+        ]
+    },
+    "Version": "1.0"
+}
