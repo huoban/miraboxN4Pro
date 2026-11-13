@@ -1,15 +1,17 @@
-// 日志模块：写入 exe 运行目录 logs\n4pro.log，单文件 2MB，保留 3 份滚动
-// 控制台模式同时输出到标准输出；-serve 模式仅写文件。
+// 日志模块：写入 exe 运行目录 logs\N4Pro.log，单文件 2MB，保留 3 份滚动
+// 控制台模式由独立线程输出（有界队列），避免控制台选中文本/管道阻塞主线程；-serve 模式仅写文件。
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Mutex;
 
 const MAX_SIZE: u64 = 2 * 1024 * 1024;
+/// 控制台待输出队列上限：写满直接丢弃，保证业务线程永不阻塞
+const CONSOLE_QUEUE: usize = 256;
 
-static CONSOLE: AtomicBool = AtomicBool::new(true);
+static CONSOLE_TX: Mutex<Option<SyncSender<String>>> = Mutex::new(None);
 static LOGGER: Mutex<Option<Logger>> = Mutex::new(None);
 
 struct Logger {
@@ -23,13 +25,23 @@ fn base_dir() -> PathBuf {
 
 /// 初始化日志；返回实际使用的日志文件路径
 pub fn init(console: bool) -> PathBuf {
-    CONSOLE.store(console, Ordering::Relaxed);
+    if console {
+        let (tx, rx) = sync_channel::<String>(CONSOLE_QUEUE);
+        std::thread::spawn(move || {
+            while let Ok(line) = rx.recv() {
+                print!("{}", line);
+            }
+        });
+        if let Ok(mut guard) = CONSOLE_TX.lock() {
+            *guard = Some(tx);
+        }
+    }
     let mut dir = base_dir().join("logs");
     if fs::create_dir_all(&dir).is_err() {
         dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("logs");
         let _ = fs::create_dir_all(&dir);
     }
-    let path = dir.join("n4pro.log");
+    let path = dir.join("N4Pro.log");
     let file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -37,7 +49,7 @@ pub fn init(console: bool) -> PathBuf {
         .or_else(|_| {
             let fallback = std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
-                .join("n4pro.log");
+                .join("N4Pro.log");
             OpenOptions::new().create(true).append(true).open(fallback)
         });
     if let Ok(f) = file {
@@ -66,8 +78,11 @@ fn rotate_if_needed(logger: &mut Logger) {
 
 fn write_line(level: &str, msg: &str) {
     let line = format!("[{}] {} {}\n", crate::platform::win::now_text(), level, msg);
-    if CONSOLE.load(Ordering::Relaxed) {
-        print!("{}", line);
+    // 控制台输出只入队，不直接写控制台：队列满即丢弃，避免选中文本/管道堵塞卡住业务线程
+    if let Ok(guard) = CONSOLE_TX.lock() {
+        if let Some(tx) = guard.as_ref() {
+            let _ = tx.try_send(line.clone());
+        }
     }
     if let Ok(mut guard) = LOGGER.lock() {
         if let Some(logger) = guard.as_mut() {

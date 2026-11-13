@@ -53,15 +53,19 @@ fn main() {
     install_ctrl_handler();
 
     // 单实例互斥，避免双开抢占 HID
-    let mutex_name = to_wide("Global\\N4ProCore_SingleInstance");
-    let _mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
-    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+    let mutex_name = to_wide("Local\\N4ProCore_SingleInstance");
+    let mutex = unsafe { CreateMutexW(std::ptr::null_mut(), 0, mutex_name.as_ptr()) };
+    let mutex_err = unsafe { GetLastError() };
+    if mutex == 0 {
+        log_warn!("单实例互斥创建失败，错误码 {}", mutex_err);
+    } else if mutex_err == ERROR_ALREADY_EXISTS {
         log_warn!("已有实例在运行，本次退出");
         if !serve {
             println!("已有实例在运行，本次退出");
         }
         return;
     }
+    let _mutex = mutex;
 
     if serve {
         log_info!("静默后台模式");

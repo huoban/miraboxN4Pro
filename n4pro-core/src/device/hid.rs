@@ -5,11 +5,14 @@
 use crate::platform::win::*;
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::sync::Mutex;
 
 pub struct HidDevice {
     handle: HANDLE,
     read_event: HANDLE,
     write_event: HANDLE,
+    /// 写帧互斥：写线程与退出回调可能同时写入，保证单帧不交错
+    write_lock: Mutex<()>,
     pub output_len: usize,
     pub input_len: usize,
 }
@@ -137,6 +140,7 @@ impl HidDevice {
                         handle,
                         read_event,
                         write_event,
+                        write_lock: Mutex::new(()),
                         output_len: if out_len == 0 { 1025 } else { out_len as usize },
                         input_len: if in_len == 0 { 513 } else { in_len as usize },
                     })
@@ -150,6 +154,8 @@ impl HidDevice {
     }
 
     pub fn write_frame(&self, frame: &[u8]) -> Result<(), String> {
+        // 串行化单帧写入：避免写线程与退出回调的帧在设备端交错
+        let _lock = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             ResetEvent(self.write_event);
             let mut ov = OVERLAPPED {

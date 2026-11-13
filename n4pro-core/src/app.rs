@@ -12,21 +12,48 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
-/// 退出信号发送端：供控制台 Ctrl+C/关窗回调使用
-static EXIT_TX: OnceLock<Mutex<Sender<Vec<u8>>>> = OnceLock::new();
+/// 写线程消息：整页刷新批次可被更新的一批整体替换，避免队列积压
+enum WriteMsg {
+    /// 普通帧（心跳、触摸条局部刷新等）
+    Frames(Vec<Vec<u8>>),
+    /// 整页刷新批次（以 CLE 开头）
+    Refresh(Vec<Vec<u8>>),
+}
 
-/// 控制台退出回调：发送 CLE+DC 帧后返回，避免设备残留异常状态
+/// 退出信号句柄：供控制台 Ctrl+C/关窗回调直接写结束帧
+static EXIT_DEV: OnceLock<Arc<HidDevice>> = OnceLock::new();
+
+/// 控制台退出回调：直接同步写 CLE+DC 帧，避免排队导致关窗时发不出去
 pub fn send_exit_frame_from_handler() {
-    if let Some(m) = EXIT_TX.get() {
-        if let Ok(tx) = m.lock() {
-            let _ = tx.send(protocol::exit_frames());
+    if let Some(dev) = EXIT_DEV.get() {
+        match dev.write_frame(&protocol::exit_frames()) {
+            Ok(()) => crate::log_info!("已发送退出信号（CLE+DC）"),
+            Err(e) => crate::log_warn!("退出信号发送失败：{}", e),
         }
-        std::thread::sleep(Duration::from_millis(250));
+        // 给设备固件留出处理时间
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
-use std::time::{Duration, Instant};
+
+/// 逐帧写入设备，并对图像头/结束帧做少量节流
+fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
+    for frame in frames {
+        if let Err(e) = dev.write_frame(frame) {
+            crate::log_error!("{}", e);
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
+        let tag = if frame.len() >= 9 { &frame[6..9] } else { &frame[..0] };
+        if tag == b"BAT" {
+            std::thread::sleep(Duration::from_millis(10));
+        } else if tag == b"STP" || tag == b"CONNECT" {
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+}
 
 pub struct App {
     cfg: config::AppConfig,
@@ -39,7 +66,7 @@ pub struct App {
     scroll: i32,
     scroll_start: i32,
     no_bgpic: bool,
-    tx: Option<Sender<Vec<u8>>>,
+    tx: Option<Sender<WriteMsg>>,
     dump: Option<std::fs::File>,
     dry_run: bool,
     key_down: [bool; 11],
@@ -186,26 +213,38 @@ impl App {
         let mut reader_rx: Option<Receiver<Vec<u8>>> = None;
         if let Some(dev) = device {
             let input_len = dev.input_len.max(513);
-            let (write_tx, write_rx) = channel::<Vec<u8>>();
+            let (write_tx, write_rx) = channel::<WriteMsg>();
             let (read_tx, read_rx) = channel::<Vec<u8>>();
             self.tx = Some(write_tx.clone());
-            let _ = EXIT_TX.set(Mutex::new(write_tx));
+            let _ = EXIT_DEV.set(Arc::clone(&dev));
             reader_rx = Some(read_rx);
 
             let dev_writer = Arc::clone(&dev);
             std::thread::spawn(move || {
-                while let Ok(frame) = write_rx.recv() {
-                    if let Err(e) = dev_writer.write_frame(&frame) {
-                        crate::log_error!("{}", e);
-                        std::thread::sleep(Duration::from_millis(200));
-                        continue;
-                    }
-                    // 节流：数据帧连发（0ms），图片头/结束帧留少量间隔
-                    let tag = if frame.len() >= 9 { &frame[6..9] } else { &frame[..0] };
-                    if tag == b"BAT" {
-                        std::thread::sleep(Duration::from_millis(10));
-                    } else if tag == b"STP" || tag == b"CONNECT" {
-                        std::thread::sleep(Duration::from_millis(30));
+                while let Ok(msg) = write_rx.recv() {
+                    match msg {
+                        // 整页刷新：丢弃排队中的旧批次/旧帧，只发送最新一批，避免积压
+                        WriteMsg::Refresh(frames) => {
+                            let mut latest = frames;
+                            let mut tail: Vec<WriteMsg> = Vec::new();
+                            while let Ok(next) = write_rx.try_recv() {
+                                match next {
+                                    WriteMsg::Refresh(f) => {
+                                        latest = f;
+                                        tail.clear();
+                                    }
+                                    other => tail.push(other),
+                                }
+                            }
+                            write_frames(&dev_writer, &latest);
+                            // 保留刷新批次之后的消息（如启动握手 CONNECT）
+                            for msg in tail {
+                                if let WriteMsg::Frames(f) = msg {
+                                    write_frames(&dev_writer, &f);
+                                }
+                            }
+                        }
+                        WriteMsg::Frames(frames) => write_frames(&dev_writer, &frames),
                     }
                 }
             });
@@ -252,7 +291,7 @@ impl App {
             if let Some(tx) = self.tx.clone() {
                 std::thread::spawn(move || loop {
                     std::thread::sleep(Duration::from_secs(2));
-                    if tx.send(protocol::rgbs()).is_err() {
+                    if tx.send(WriteMsg::Frames(vec![protocol::rgbs()])).is_err() {
                         break;
                     }
                 });
@@ -314,19 +353,29 @@ impl App {
         }
     }
 
-    /// 发送帧（含转储）
+    /// 发送普通帧（含转储）
     fn emit(&mut self, frames: Vec<Vec<u8>>) {
+        self.emit_msg(WriteMsg::Frames(frames));
+    }
+
+    /// 发送整页刷新批次（写线程会合并掉过期的旧批次）
+    fn emit_refresh(&mut self, frames: Vec<Vec<u8>>) {
+        self.emit_msg(WriteMsg::Refresh(frames));
+    }
+
+    fn emit_msg(&mut self, msg: WriteMsg) {
+        let frames = match &msg {
+            WriteMsg::Frames(f) | WriteMsg::Refresh(f) => f,
+        };
         if let Some(file) = self.dump.as_mut() {
-            for frame in &frames {
+            for frame in frames {
                 let hex: String = frame.iter().map(|b| format!("{:02x}", b)).collect();
                 let _ = writeln!(file, "{}", hex);
             }
             let _ = file.flush();
         }
         if let Some(tx) = &self.tx {
-            for frame in frames {
-                let _ = tx.send(frame);
-            }
+            let _ = tx.send(msg);
         }
     }
 
@@ -384,7 +433,7 @@ impl App {
             frames.len(),
             if self.knob_mode { "旋钮模式" } else { "Control Bar" }
         );
-        self.emit(frames);
+        self.emit_refresh(frames);
     }
 
     /// Control Bar 最大滚动偏移：保证最后一个按钮能完整显示

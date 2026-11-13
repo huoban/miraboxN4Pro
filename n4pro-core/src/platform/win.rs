@@ -503,9 +503,14 @@ extern "system" {
 }
 
 /// 控制台关闭/ Ctrl+C 回调：发送退出帧
-extern "system" fn ctrl_handler(_ctrl_type: u32) -> BOOL {
+extern "system" fn ctrl_handler(ctrl_type: u32) -> BOOL {
     crate::app::send_exit_frame_from_handler();
-    1
+    // Ctrl+C / Ctrl+Break 交回默认处理，确保进程真正退出（避免残留实例占用 HID 句柄）；
+    // 关窗/注销/关机由系统在回调返回后强制终止
+    match ctrl_type {
+        0 | 1 => 0,
+        _ => 1,
+    }
 }
 
 /// 安装控制台退出回调，保证关闭窗口前向设备发送结束信号

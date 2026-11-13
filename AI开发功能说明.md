@@ -75,12 +75,13 @@ d:\Ai\N4PRO
   - `cache: ImageCache` PNG 缓存
   - `knob_mode: bool` 触摸条模式
   - `scroll: i32` Control Bar 滚动偏移
-  - `tx: Option<Sender<Vec<u8>>>` HID 写队列
+  - `tx: Option<Sender<WriteMsg>>` HID 写队列（整页刷新批次可合并）
   - `dry_run/no_device/once: bool` 测试开关
 - 核心方法：
   - `new(cfg, dry_run, dump_frames, no_device, once) -> Result<App, String>`：加载场景并定位页面
   - `run(&mut self)`：打开设备、发送初始化帧、进入事件循环
-  - `refresh_all(&mut self)`：整页刷新
+  - `refresh_all(&mut self)`：整页刷新（按批入队，写线程丢弃过期批次）
+  - `emit / emit_refresh / emit_msg`：普通帧与整页刷新批次入队
   - `handle_report(&mut self, &[u8])`：解析并处理输入
   - `switch_page(&mut self, i32)` / `switch_scene(&mut self, &str)`
 - 标准用法示例：
@@ -90,12 +91,12 @@ d:\Ai\N4PRO
   app.run();
   ```
 - 依赖关系：config、device、render、actions、platform
-- 迭代记录：0.1.0 新建
+- 迭代记录：0.1.0 新建；0.3.8 写队列改为批次消息并合并过期整页刷新，退出帧改直写
 
 ### 类名称：HidDevice
 - 所属文件：`n4pro-core/src/device/hid.rs`
 - 核心功能：枚举并打开 N4 Pro 厂商 HID 集合，提供 1025B 写、512B 读。
-- 核心属性：`handle: HANDLE`、`output_len: usize`、`input_len: usize`
+- 核心属性：`handle: HANDLE`、`write_lock: Mutex<()>`（写帧互斥）、`output_len: usize`、`input_len: usize`
 - 核心方法：`open_n4pro() -> Result<HidDevice, String>`、`write_frame(&[u8])`、`read_report(&mut [u8])`
 - 标准用法示例：
   ```rust
@@ -103,7 +104,7 @@ d:\Ai\N4PRO
   dev.write_frame(&protocol::lig(60))?;
   ```
 - 依赖关系：platform::win（SetupAPI/Hid/kernel32）
-- 迭代记录：0.1.0 新建
+- 迭代记录：0.1.0 新建；0.3.8 增加写锁，避免写线程与退出回调的帧交错
 
 ### 类名称：Canvas
 - 所属文件：`n4pro-core/src/render/canvas.rs`
@@ -338,11 +339,23 @@ d:\Ai\N4PRO
 
 ---
 
+### 版本号：0.3.8
+- 编译时间：2026-11-13 11:54
+- 环境配置：`d:\Ai\N4PRO\n4pro-core\build.bat`（Rust 1.95.0 x86_64-msvc）
+- 编译结果：编译成功
+- 本次版本变更概要：
+  1. 新增：控制台日志独立线程输出（有界队列 256 行，写满丢弃）；写队列批次合并（整页刷新只发最新一批）；HID 写帧互斥锁；退出帧直写句柄
+  2. 修改：日志文件名 `n4pro.log` → `N4Pro.log`（仍在 exe 运行目录 `logs\`）；Ctrl+C/Ctrl+Break 发送退帧后交回默认处理，确保进程退出；单实例互斥体改 `Local\` 并校验创建结果
+  3. 删除：无
+  4. 兼容说明：日志路径不变（仅文件名大小写）；渲染、协议帧、配置读取与按键/旋钮/触摸行为不变
+
+---
+
 ## 最新版本对比变更概要
 
-### 对比版本：0.3.7 VS 0.3.6
-- 对比生成时间：2026-11-13 10:29
-- 新增内容：退出帧、控制台退出回调、场景轮换
-- 修改内容：旋钮旋转编码、多媒体 22
+### 对比版本：0.3.8 VS 0.3.7
+- 对比生成时间：2026-11-13 11:56
+- 新增内容：控制台非阻塞日志线程、整页刷新批次合并、HID 写锁、退出帧直写
+- 修改内容：日志文件名改为 `N4Pro.log`；Ctrl+C 正常退出；单实例互斥体修正
 - 删除内容：无
-- 核心影响说明：正常关闭不再导致设备需重新插拔；4 个旋钮与当前页图标功能联动
+- 核心影响说明：主线程不再被控制台输出卡住，快速切页不再积压几十秒；关闭时不再残留实例占用 HID 句柄
