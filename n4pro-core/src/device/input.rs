@@ -71,10 +71,19 @@ pub fn parse(buf: &[u8]) -> Option<InputEvent> {
                 down: state == 1,
             },
             // 旋钮旋转编码（实测）：1=0xA0/0xA1，2=0x50/0x51，3=0x90/0x91，4=0x70/0x71
-            0xA0 | 0xA1 => InputEvent::DialRotate { id: 1, dir: (index & 1) as i8 },
-            0x50 | 0x51 => InputEvent::DialRotate { id: 2, dir: (index & 1) as i8 },
-            0x90 | 0x91 => InputEvent::DialRotate { id: 3, dir: (index & 1) as i8 },
-            0x70 | 0x71 => InputEvent::DialRotate { id: 4, dir: (index & 1) as i8 },
+            // 奇数码=顺时针(+1)，偶数码=逆时针(-1)，下游统一按正负判断方向
+            0xA0 | 0xA1 | 0x50 | 0x51 | 0x90 | 0x91 | 0x70 | 0x71 => {
+                let id = match index {
+                    0xA0 | 0xA1 => 1,
+                    0x50 | 0x51 => 2,
+                    0x90 | 0x91 => 3,
+                    _ => 4,
+                };
+                InputEvent::DialRotate {
+                    id,
+                    dir: if index & 1 == 1 { 1 } else { -1 },
+                }
+            }
             // 旋钮按下编码（实测/协议文档）：0x37=1、0x35=2、0x33=3、0x36=4
             0x37 => InputEvent::DialPress { id: 1, down: state == 1 },
             0x35 => InputEvent::DialPress { id: 2, down: state == 1 },
@@ -122,7 +131,7 @@ mod tests {
         buf[9] = 0xA1;
         assert_eq!(parse(&buf), Some(InputEvent::DialRotate { id: 1, dir: 1 }));
         buf[9] = 0x50;
-        assert_eq!(parse(&buf), Some(InputEvent::DialRotate { id: 2, dir: 0 }));
+        assert_eq!(parse(&buf), Some(InputEvent::DialRotate { id: 2, dir: -1 }));
         buf[9] = 0x37;
         buf[10] = 1;
         assert_eq!(parse(&buf), Some(InputEvent::DialPress { id: 1, down: true }));
