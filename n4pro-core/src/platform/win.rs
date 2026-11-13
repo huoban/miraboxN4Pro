@@ -498,6 +498,23 @@ pub fn run_hidden(command: &str) -> bool {
     }
 }
 
+extern "system" {
+    fn SetConsoleCtrlHandler(handler: Option<extern "system" fn(u32) -> BOOL>, add: BOOL) -> BOOL;
+}
+
+/// 控制台关闭/ Ctrl+C 回调：发送退出帧
+extern "system" fn ctrl_handler(_ctrl_type: u32) -> BOOL {
+    crate::app::send_exit_frame_from_handler();
+    1
+}
+
+/// 安装控制台退出回调，保证关闭窗口前向设备发送结束信号
+pub fn install_ctrl_handler() {
+    unsafe {
+        SetConsoleCtrlHandler(Some(ctrl_handler), 1);
+    }
+}
+
 /// 隐藏当前控制台窗口（-serve 使用）
 pub fn detach_console() {
     unsafe {

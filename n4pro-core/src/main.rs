@@ -50,6 +50,7 @@ fn main() {
 
     log_info!("N4ProCore 启动，版本 {}", env!("CARGO_PKG_VERSION"));
     log_info!("日志文件：{}", log_path.display());
+    install_ctrl_handler();
 
     // 单实例互斥，避免双开抢占 HID
     let mutex_name = to_wide("Global\\N4ProCore_SingleInstance");

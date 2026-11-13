@@ -12,7 +12,20 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// 退出信号发送端：供控制台 Ctrl+C/关窗回调使用
+static EXIT_TX: OnceLock<Mutex<Sender<Vec<u8>>>> = OnceLock::new();
+
+/// 控制台退出回调：发送 CLE+DC 帧后返回，避免设备残留异常状态
+pub fn send_exit_frame_from_handler() {
+    if let Some(m) = EXIT_TX.get() {
+        if let Ok(tx) = m.lock() {
+            let _ = tx.send(protocol::exit_frames());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
 use std::time::{Duration, Instant};
 
 pub struct App {
@@ -175,7 +188,8 @@ impl App {
             let input_len = dev.input_len.max(513);
             let (write_tx, write_rx) = channel::<Vec<u8>>();
             let (read_tx, read_rx) = channel::<Vec<u8>>();
-            self.tx = Some(write_tx);
+            self.tx = Some(write_tx.clone());
+            let _ = EXIT_TX.set(Mutex::new(write_tx));
             reader_rx = Some(read_rx);
 
             let dev_writer = Arc::clone(&dev);
@@ -444,7 +458,7 @@ impl App {
         };
         match event {
             InputEvent::Key { index, down } => self.on_key(index, down),
-            InputEvent::DialRotate { id } => self.on_dial_rotate(id),
+            InputEvent::DialRotate { id, dir } => self.on_dial_rotate(id, dir),
             InputEvent::DialPress { id, down } => {
                 if down {
                     self.on_dial_press(id);
@@ -534,10 +548,20 @@ impl App {
         // 按用户要求：按键操作不触发图像刷新，仅在切页时整页重绘
     }
 
-    fn on_dial_rotate(&mut self, id: u8) {
+    fn on_dial_rotate(&mut self, id: u8, dir: i8) {
         let pos = format!("{},0", id.saturating_sub(1));
         if let Some(def) = self.actions.get(&pos).cloned() {
-            crate::log_info!("旋钮 {} 旋转，执行 {}", id, def.name);
+            crate::log_info!(
+                "旋钮 {} 旋转（{}），执行 {}",
+                id,
+                if dir > 0 { "顺时针" } else { "逆时针" },
+                def.name
+            );
+            if def.uuid.to_lowercase().contains("profile.rotate") {
+                // 官方在 ProfileUUID 为空时按方向循环切换场景
+                self.cycle_scene(if dir > 0 { 1 } else { -1 });
+                return;
+            }
             let effect = actions::execute(&def, self.dry_run, 0);
             self.apply_effect(effect);
         } else {
@@ -549,8 +573,52 @@ impl App {
         let pos = format!("{},0", id.saturating_sub(1));
         if let Some(def) = self.actions.get(&pos).cloned() {
             crate::log_info!("旋钮 {} 按下，执行 {}", id, def.name);
+            if def.uuid.to_lowercase().contains("profile.rotate") {
+                self.cycle_scene(1);
+                return;
+            }
             let effect = actions::execute(&def, self.dry_run, 0);
             self.apply_effect(effect);
+        }
+    }
+
+    /// 循环切换场景目录（*.sdProfile），dir=1 下一个、-1 上一个
+    fn cycle_scene(&mut self, dir: i8) {
+        let Some(parent) = self.cfg.profile_dir.parent().map(|p| p.to_path_buf()) else {
+            return;
+        };
+        let Ok(rd) = std::fs::read_dir(&parent) else { return };
+        let mut scenes: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_dir()
+                    && p.extension()
+                        .map(|x| x.eq_ignore_ascii_case("sdProfile"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        if scenes.is_empty() {
+            return;
+        }
+        scenes.sort();
+        let cur = scenes
+            .iter()
+            .position(|p| p == &self.cfg.profile_dir)
+            .unwrap_or(0) as i32;
+        let next = (cur + dir as i32).rem_euclid(scenes.len() as i32) as usize;
+        let path = scenes[next].clone();
+        match config::load_scene(&path) {
+            Ok(scene) => {
+                self.scene = scene;
+                self.cfg.profile_dir = path;
+                self.page_idx = 0;
+                self.resolve_current_page();
+                self.load_current_page();
+                crate::log_info!("场景切换：{}", self.scene.name);
+                self.refresh_all();
+            }
+            Err(e) => crate::log_warn!("场景切换失败：{}", e),
         }
     }
 

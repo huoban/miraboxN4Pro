@@ -34,6 +34,8 @@ pub fn run(settings: &Value, dry_run: bool, volume: bool) {
             4 => VK_VOLUME_MUTE,
             5 => VK_VOLUME_UP,
             6 => VK_VOLUME_DOWN,
+            // 官方多媒体编号 22 = 播放/暂停
+            22 => VK_MEDIA_PLAY_PAUSE,
             _ => {
                 crate::log_warn!("未知多媒体动作编号 {}，已忽略", idx);
                 return;

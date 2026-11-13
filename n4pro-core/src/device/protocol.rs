@@ -21,6 +21,14 @@ fn header(payload: &mut [u8; PAYLOAD_LEN]) {
     payload[2] = b'T';
 }
 
+/// 退出命令：CRT + CLE + 参数 "DC"（官方 closeHidDevice 关闭前发送）
+pub fn exit_frames() -> Vec<u8> {
+    let mut f = command("CLE");
+    f[11] = 0x44;
+    f[12] = 0x43;
+    f
+}
+
 fn command(name: &str) -> Vec<u8> {
     let mut payload = [0u8; PAYLOAD_LEN];
     header(&mut payload);
