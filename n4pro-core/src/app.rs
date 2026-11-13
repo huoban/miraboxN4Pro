@@ -93,6 +93,9 @@ impl App {
         };
         app.resolve_current_page();
         app.load_current_page();
+        // 官方把触摸条滚动位置存在 Settings.widgetCurrX（负值），启动时恢复
+        let max = app.max_scroll();
+        app.scroll = (-app.scene.touchbar_curr_x).clamp(0, max);
         Ok(app)
     }
 
@@ -117,7 +120,6 @@ impl App {
     fn load_current_page(&mut self) {
         self.actions.clear();
         self.cache.clear();
-        self.scroll = 0;
         let page_name = self.scene.pages.get(self.page_idx).cloned().unwrap_or_default();
         let scene_name = self
             .scene
@@ -473,9 +475,45 @@ impl App {
                 self.cache.clear();
                 self.refresh_touchbar();
             }
+            InputEvent::BarTap { code, x } => self.on_bar_tap(code, x),
             InputEvent::Unknown { index, state } => {
                 crate::log_info!("未知输入事件：idx=0x{:02X} state={}", index, state);
             }
+        }
+    }
+
+    /// Control Bar 点击命中：index = (X + scroll - 25) / 152
+    fn on_bar_tap(&mut self, code: u8, x: i32) {
+        if self.knob_mode {
+            return;
+        }
+        if code == 0x39 {
+            crate::log_info!("Control Bar 返回键（0x39），忽略");
+            return;
+        }
+        let count = self.scene.touchbar.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let idx = if x >= 0 {
+            (x + self.scroll - 25) / BTN_STEP
+        } else {
+            code as i32 - 0x40
+        };
+        if idx < 0 || idx >= count {
+            crate::log_info!("Control Bar 点击越界：code=0x{:02X} x={} idx={}", code, x, idx);
+            return;
+        }
+        if let Some(def) = self.scene.touchbar.get(idx as usize).cloned() {
+            crate::log_info!(
+                "Control Bar 点击：code=0x{:02X} x={} -> 第 {} 项（{}）",
+                code,
+                x,
+                idx + 1,
+                def.name
+            );
+            let effect = actions::execute(&def, self.dry_run, 0);
+            self.apply_effect(effect);
         }
     }
 

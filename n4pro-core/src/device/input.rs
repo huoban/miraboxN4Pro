@@ -15,6 +15,8 @@ pub enum InputEvent {
     DialPress { id: u8, down: bool },
     /// 固件切换触摸条模式：true=Control Bar，false=旋钮模式
     ModeChanged { control_bar: bool },
+    /// Control Bar 点击：code=0x39 返回，0x40~0x43 快捷位；x 为触点横坐标
+    BarTap { code: u8, x: i32 },
     Unknown { index: u8, state: u8 },
 }
 
@@ -56,6 +58,14 @@ pub fn parse(buf: &[u8]) -> Option<InputEvent> {
             }
             0xB1 => InputEvent::ModeChanged { control_bar: false },
             0xB2 => InputEvent::ModeChanged { control_bar: true },
+            0x39..=0x43 => {
+                let x = if data.len() >= 13 {
+                    (((data[11] as i32) << 8) | data[12] as i32) & 0xFFFF
+                } else {
+                    -1
+                };
+                InputEvent::BarTap { code: index, x }
+            }
             1..=10 => InputEvent::Key {
                 index,
                 down: state == 1,

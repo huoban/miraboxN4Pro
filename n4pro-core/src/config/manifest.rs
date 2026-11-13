@@ -62,6 +62,8 @@ pub struct Scene {
     pub pages: Vec<String>,
     pub root_actions: BTreeMap<String, ActionDef>,
     pub touchbar: Vec<ActionDef>,
+    /// 触摸条滚动偏移（官方 Settings.widgetCurrX，通常为负值）
+    pub touchbar_curr_x: i32,
 }
 
 #[derive(Deserialize)]
@@ -156,10 +158,18 @@ pub fn load_scene(dir: &Path) -> Result<Scene, String> {
     let raw: RawManifest = serde_json::from_value(json).map_err(|e| format!("场景结构解析失败: {}", e))?;
     let mut root_actions = BTreeMap::new();
     let mut touchbar = Vec::new();
+    let mut touchbar_curr_x = 0i32;
     for (key, value) in &raw.actions {
         if key == "touchbar" {
             if let Some(list) = value.get("Actions").and_then(|x| x.as_array()) {
                 touchbar = list.iter().map(parse_action).collect();
+            }
+            if let Some(v) = value
+                .get("Settings")
+                .and_then(|s| s.get("widgetCurrX"))
+                .and_then(|v| v.as_i64())
+            {
+                touchbar_curr_x = v as i32;
             }
         } else {
             root_actions.insert(key.clone(), parse_action(value));
@@ -172,6 +182,7 @@ pub fn load_scene(dir: &Path) -> Result<Scene, String> {
         pages: raw.pages.map(|p| p.pages).unwrap_or_default(),
         root_actions,
         touchbar,
+        touchbar_curr_x,
     })
 }
 
