@@ -1,6 +1,6 @@
 // 应用核心：配置装载、页面渲染、HID 收发、输入事件、动作执行
 
-use crate::actions::{self, Effect};
+use crate::actions::{self, Effect, Trigger};
 use crate::config::{self, ActionDef, Scene};
 use crate::device::{input::InputEvent, protocol, HidDevice};
 use crate::render::key::{render_key, render_label};
@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// 写线程消息：整页刷新批次可被更新的一批整体替换，避免队列积压
@@ -24,15 +24,25 @@ enum WriteMsg {
     Refresh(Vec<Vec<u8>>),
 }
 
+/// 会话结束方式：退出程序 / 等待设备后重连
+enum SessionEnd {
+    Exit,
+    Reconnect,
+}
+
 /// 退出信号句柄：供控制台 Ctrl+C/关窗回调直接写结束帧
-static EXIT_DEV: OnceLock<Arc<HidDevice>> = OnceLock::new();
+static EXIT_DEV: Mutex<Option<Arc<HidDevice>>> = Mutex::new(None);
+
+/// 会话运行标记：心跳线程据此退出
+static SESSION_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// 退出标记：置位后写线程停止发送图像帧，保证结束帧是最后一帧
 static EXITING: AtomicBool = AtomicBool::new(false);
 
 /// 控制台退出回调：先停写线程，再直接同步写 CLE+DC 帧，避免传输中途断开
 pub fn send_exit_frame_from_handler() {
-    if let Some(dev) = EXIT_DEV.get() {
+    let dev = EXIT_DEV.lock().ok().and_then(|guard| guard.clone());
+    if let Some(dev) = dev {
         EXITING.store(true, Ordering::Relaxed);
         // 等待当前帧写完，避免中断图像传输
         std::thread::sleep(Duration::from_millis(100));
@@ -76,6 +86,8 @@ pub struct App {
     scroll: i32,
     scroll_start: i32,
     no_bgpic: bool,
+    /// 设备是否处于息屏状态
+    sleeping: bool,
     tx: Option<Sender<WriteMsg>>,
     dump: Option<std::fs::File>,
     dry_run: bool,
@@ -127,6 +139,7 @@ impl App {
             scroll: 0,
             scroll_start: 0,
             no_bgpic,
+            sleeping: false,
             tx: None,
             dump,
             dry_run,
@@ -199,120 +212,132 @@ impl App {
     }
 
     pub fn run(&mut self) {
-        // 打开设备
-        let device = if self.no_device {
+        // 外层循环：设备断开后关闭句柄、等待 USB 接入、重新初始化
+        loop {
+            match self.run_session() {
+                SessionEnd::Exit => return,
+                SessionEnd::Reconnect => {
+                    crate::log_warn!("设备通信中断，进入 USB 等待模式");
+                    crate::platform::device_watch::wait_for_device();
+                }
+            }
+        }
+    }
+
+    /// 单次设备会话；返回 Exit（不再重连）或 Reconnect（等待设备）
+    fn run_session(&mut self) -> SessionEnd {
+        if self.no_device {
             crate::log_warn!("--no-device：跳过设备打开（离线验证）");
-            None
-        } else {
-            match HidDevice::open_n4pro() {
-                Ok(d) => {
-                    crate::log_info!(
-                        "已打开 N4 Pro：输出 {}B / 输入 {}B",
-                        d.output_len,
-                        d.input_len
-                    );
-                    Some(Arc::new(d))
-                }
-                Err(e) => {
-                    crate::log_error!("设备打开失败：{}", e);
-                    None
-                }
+            return self.run_offline();
+        }
+
+        let dev = match HidDevice::open_n4pro() {
+            Ok(d) => {
+                crate::log_info!(
+                    "已打开 N4 Pro：输出 {}B / 输入 {}B",
+                    d.output_len,
+                    d.input_len
+                );
+                Arc::new(d)
+            }
+            Err(e) => {
+                crate::log_warn!("设备打开失败：{}", e);
+                return SessionEnd::Reconnect;
             }
         };
 
-        let mut reader_rx: Option<Receiver<Vec<u8>>> = None;
-        if let Some(dev) = device {
-            let input_len = dev.input_len.max(513);
-            let (write_tx, write_rx) = channel::<WriteMsg>();
-            let (read_tx, read_rx) = channel::<Vec<u8>>();
-            self.tx = Some(write_tx.clone());
-            let _ = EXIT_DEV.set(Arc::clone(&dev));
-            reader_rx = Some(read_rx);
+        let input_len = dev.input_len.max(513);
+        let (write_tx, write_rx) = channel::<WriteMsg>();
+        let (read_tx, read_rx) = channel::<Vec<u8>>();
+        self.tx = Some(write_tx.clone());
+        if let Ok(mut guard) = EXIT_DEV.lock() {
+            *guard = Some(Arc::clone(&dev));
+        }
+        SESSION_RUNNING.store(true, Ordering::SeqCst);
 
-            let dev_writer = Arc::clone(&dev);
-            std::thread::spawn(move || {
-                while let Ok(msg) = write_rx.recv() {
-                    match msg {
-                        // 整页刷新：丢弃排队中的旧批次/旧帧，只发送最新一批，避免积压
-                        WriteMsg::Refresh(frames) => {
-                            let mut latest = frames;
-                            let mut tail: Vec<WriteMsg> = Vec::new();
-                            while let Ok(next) = write_rx.try_recv() {
-                                match next {
-                                    WriteMsg::Refresh(f) => {
-                                        latest = f;
-                                        tail.clear();
-                                    }
-                                    other => tail.push(other),
+        let dev_writer = Arc::clone(&dev);
+        std::thread::spawn(move || {
+            while let Ok(msg) = write_rx.recv() {
+                match msg {
+                    // 整页刷新：丢弃排队中的旧批次/旧帧，只发送最新一批，避免积压
+                    WriteMsg::Refresh(frames) => {
+                        let mut latest = frames;
+                        let mut tail: Vec<WriteMsg> = Vec::new();
+                        while let Ok(next) = write_rx.try_recv() {
+                            match next {
+                                WriteMsg::Refresh(f) => {
+                                    latest = f;
+                                    tail.clear();
                                 }
-                            }
-                            write_frames(&dev_writer, &latest);
-                            // 保留刷新批次之后的消息（如启动握手 CONNECT）
-                            for msg in tail {
-                                if let WriteMsg::Frames(f) = msg {
-                                    write_frames(&dev_writer, &f);
-                                }
+                                other => tail.push(other),
                             }
                         }
-                        WriteMsg::Frames(frames) => write_frames(&dev_writer, &frames),
-                    }
-                }
-            });
-
-            let dev_reader = Arc::clone(&dev);
-            std::thread::spawn(move || {
-                let mut buf = vec![0u8; input_len];
-                loop {
-                    match dev_reader.read_report(&mut buf) {
-                        Ok(n) if n > 0 => {
-                            if read_tx.send(buf[..n].to_vec()).is_err() {
-                                break;
+                        write_frames(&dev_writer, &latest);
+                        // 保留刷新批次之后的消息（如启动握手 CONNECT）
+                        for msg in tail {
+                            if let WriteMsg::Frames(f) = msg {
+                                write_frames(&dev_writer, &f);
                             }
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            crate::log_error!("读取失败：{}", e);
-                            std::thread::sleep(Duration::from_millis(500));
                         }
                     }
+                    WriteMsg::Frames(frames) => write_frames(&dev_writer, &frames),
                 }
-            });
-
-            // 等待设备就绪后再发命令
-            std::thread::sleep(Duration::from_millis(300));
-
-            if self.probe {
-                crate::log_info!("--probe：仅发送 DIS + LIG 后退出");
-                self.emit(vec![
-                    protocol::dis(),
-                    protocol::lig(self.cfg.brightness),
-                ]);
-                std::thread::sleep(Duration::from_millis(600));
-                send_exit_frame_from_handler();
-                return;
             }
+        });
 
-            // 初始化命令（与已验证可行的最小序列一致）
+        let dev_reader = Arc::clone(&dev);
+        std::thread::spawn(move || {
+            let mut buf = vec![0u8; input_len];
+            loop {
+                match dev_reader.read_report(&mut buf) {
+                    Ok(n) if n > 0 => {
+                        if read_tx.send(buf[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        crate::log_error!("读取失败：{}", e);
+                        // 空帧作为断开标记，通知主循环结束本次会话
+                        let _ = read_tx.send(Vec::new());
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 等待设备就绪后再发命令
+        std::thread::sleep(Duration::from_millis(300));
+
+        if self.probe {
+            crate::log_info!("--probe：仅发送 DIS + LIG 后退出");
             self.emit(vec![
                 protocol::dis(),
                 protocol::lig(self.cfg.brightness),
             ]);
+            std::thread::sleep(Duration::from_millis(600));
+            send_exit_frame_from_handler();
+            self.end_session();
+            return SessionEnd::Exit;
+        }
 
-            // 2 秒心跳，避免固件超时断链
-            if let Some(tx) = self.tx.clone() {
-                std::thread::spawn(move || loop {
-                    std::thread::sleep(Duration::from_secs(2));
-                    if tx.send(WriteMsg::Frames(vec![protocol::rgbs()])).is_err() {
-                        break;
-                    }
-                });
-            }
-        } else {
-            crate::log_warn!("无设备，进入离线模式（仅日志/帧转储）");
-            if !self.no_device {
-                crate::log_error!("设备不可用，程序退出");
-                return;
-            }
+        // 初始化命令（与已验证可行的最小序列一致）
+        self.emit(vec![
+            protocol::dis(),
+            protocol::lig(self.cfg.brightness),
+        ]);
+
+        // 2 秒心跳，避免固件超时断链；会话结束后自动退出
+        if let Some(tx) = self.tx.clone() {
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                if !SESSION_RUNNING.load(Ordering::SeqCst) {
+                    break;
+                }
+                if tx.send(WriteMsg::Frames(vec![protocol::rgbs()])).is_err() {
+                    break;
+                }
+            });
         }
 
         if self.slot_test {
@@ -336,33 +361,71 @@ impl App {
             // 单次模式下短暂等待设备回执，便于确认命令被接收
             let deadline = Instant::now() + Duration::from_millis(1500);
             while Instant::now() < deadline {
-                let Some(rx) = &reader_rx else { break };
-                match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(buf) => self.handle_report(&buf),
+                match read_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(buf) if !buf.is_empty() => self.handle_report(&buf),
+                    Ok(_) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
             }
             crate::log_info!("--once：完成一次整页刷新后退出");
             send_exit_frame_from_handler();
-            return;
+            self.end_session();
+            return SessionEnd::Exit;
         }
 
-        // 主事件循环
-        let rx = reader_rx;
+        // 主事件循环：空帧=设备断开
         loop {
-            match &rx {
-                Some(rx) => match rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(buf) => self.handle_report(&buf),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                        crate::log_error!("HID 读线程已退出，程序结束");
-                        break;
-                    }
-                },
-                None => std::thread::sleep(Duration::from_millis(200)),
+            match read_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(buf) if buf.is_empty() => {
+                    crate::log_warn!("HID 读取线程检测到设备断开");
+                    break;
+                }
+                Ok(buf) => self.handle_report(&buf),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    crate::log_warn!("HID 读线程已退出");
+                    break;
+                }
             }
         }
+        self.end_session();
+        SessionEnd::Reconnect
+    }
+
+    /// 离线模式（--no-device）：仅渲染与日志
+    fn run_offline(&mut self) -> SessionEnd {
+        if self.slot_test {
+            let mut frames = vec![protocol::cle()];
+            for slot in 1u8..=15 {
+                if let Ok(png) = render_label(&slot.to_string(), 112, 112, 48) {
+                    frames.extend(protocol::bat_frames(&png, slot));
+                }
+            }
+            frames.push(protocol::setlb());
+            frames.push(protocol::stp());
+            self.emit(frames);
+        } else {
+            self.refresh_all();
+        }
+        if self.once {
+            crate::log_info!("--once：完成一次整页刷新后退出");
+            return SessionEnd::Exit;
+        }
+        loop {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// 结束会话：停止写线程、释放设备句柄
+    fn end_session(&mut self) {
+        SESSION_RUNNING.store(false, Ordering::SeqCst);
+        self.tx = None;
+        if let Ok(mut guard) = EXIT_DEV.lock() {
+            *guard = None;
+        }
+        // 等待写线程处理完当前帧并退出
+        std::thread::sleep(Duration::from_millis(200));
     }
 
     /// 发送普通帧（含转储）
@@ -587,7 +650,7 @@ impl App {
                 idx + 1,
                 def.name
             );
-            let effect = actions::execute(&def, self.dry_run, 0);
+            let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
             self.apply_effect(effect);
         }
     }
@@ -600,7 +663,7 @@ impl App {
         let pos = key_pos(index);
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
-                let effect = actions::execute(&def, self.dry_run, 0);
+                let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
                 self.apply_effect(effect);
             } else {
                 crate::log_info!("按键 {}（{}）未绑定动作", index, pos);
@@ -623,7 +686,7 @@ impl App {
                 self.cycle_scene(if dir > 0 { 1 } else { -1 });
                 return;
             }
-            let effect = actions::execute(&def, self.dry_run, 0);
+            let effect = actions::execute(&def, self.dry_run, 0, Trigger::Rotate(dir));
             self.apply_effect(effect);
         } else {
             crate::log_info!("旋钮 {} 旋转（未绑定）", id);
@@ -638,7 +701,7 @@ impl App {
                 self.cycle_scene(1);
                 return;
             }
-            let effect = actions::execute(&def, self.dry_run, 0);
+            let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
             self.apply_effect(effect);
         }
     }
@@ -754,8 +817,78 @@ impl App {
             Effect::None => {}
             Effect::NextPage => self.switch_page(1),
             Effect::PrevPage => self.switch_page(-1),
+            Effect::GotoPage(target) => self.goto_page(&target),
+            Effect::BackToParent => self.back_to_parent(),
             Effect::SwitchScene(uuid) => self.switch_scene(&uuid),
+            Effect::BrightnessDelta(delta) => self.adjust_brightness(delta),
+            Effect::DeviceSleepToggle => self.toggle_device_sleep(),
         }
+    }
+
+    /// 跳转到指定页（页码或页面 UUID）
+    fn goto_page(&mut self, target: &str) {
+        if self.scene.pages.is_empty() {
+            crate::log_warn!("场景没有页面，忽略跳转");
+            return;
+        }
+        let idx = if let Ok(n) = target.trim().parse::<usize>() {
+            // 页码从 1 开始；超出范围时取最后一页
+            (n.saturating_sub(1)).min(self.scene.pages.len() - 1)
+        } else if let Some(pos) = self.scene.pages.iter().position(|p| p == target) {
+            pos
+        } else {
+            crate::log_warn!("未找到目标页面：{}", target);
+            return;
+        };
+        self.page_idx = idx;
+        crate::log_info!(
+            "切换到页面 {}/{}",
+            self.page_idx + 1,
+            self.scene.pages.len()
+        );
+        self.load_current_page();
+        self.refresh_all();
+    }
+
+    /// 返回场景根页
+    fn back_to_parent(&mut self) {
+        let scene_name = self
+            .scene
+            .dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if let Some(root) = self.scene.pages.iter().position(|p| *p == scene_name) {
+            if root != self.page_idx {
+                self.page_idx = root;
+                crate::log_info!("返回场景根页 {}/{}", root + 1, self.scene.pages.len());
+                self.load_current_page();
+                self.refresh_all();
+                return;
+            }
+        }
+        crate::log_info!("已在场景根页，忽略返回动作");
+    }
+
+    /// 调整设备亮度（增量）
+    fn adjust_brightness(&mut self, delta: i32) {
+        let next = (self.cfg.brightness as i32 + delta).clamp(0, 100) as u8;
+        if next == self.cfg.brightness && !self.sleeping {
+            return;
+        }
+        self.cfg.brightness = next;
+        self.sleeping = false;
+        self.emit(vec![protocol::lig(next)]);
+        crate::log_info!("设备亮度调整为 {}", next);
+    }
+
+    /// 设备息屏切换（亮度 0 / 恢复）
+    fn toggle_device_sleep(&mut self) {
+        self.sleeping = !self.sleeping;
+        let level = if self.sleeping { 0 } else { self.cfg.brightness };
+        self.emit(vec![protocol::lig(level)]);
+        crate::log_info!("设备息屏：{}", self.sleeping);
     }
 
     fn switch_scene(&mut self, uuid: &str) {

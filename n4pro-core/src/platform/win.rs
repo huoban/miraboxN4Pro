@@ -20,6 +20,7 @@ pub type LONG = i32;
 pub type ULONG_PTR = usize;
 pub type COLORREF = u32;
 pub type NTSTATUS = i32;
+pub type BOOLEAN = u8;
 
 pub const INVALID_HANDLE_VALUE: HANDLE = -1;
 pub const GENERIC_READ: u32 = 0x8000_0000;
@@ -52,6 +53,24 @@ pub const STARTF_USESHOWWINDOW: u32 = 0x0000_0001;
 pub const FILE_FLAG_OVERLAPPED: u32 = 0x4000_0000;
 pub const ERROR_IO_PENDING: u32 = 997;
 pub const INFINITE: u32 = 0xFFFF_FFFF;
+
+// 输入模拟（SendInput）相关常量
+pub const INPUT_MOUSE: u32 = 0;
+pub const INPUT_KEYBOARD: u32 = 1;
+pub const MOUSEEVENTF_MOVE: u32 = 0x0001;
+pub const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+pub const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+pub const MOUSEEVENTF_RIGHTDOWN: u32 = 0x0008;
+pub const MOUSEEVENTF_RIGHTUP: u32 = 0x0010;
+pub const MOUSEEVENTF_MIDDLEDOWN: u32 = 0x0020;
+pub const MOUSEEVENTF_MIDDLEUP: u32 = 0x0040;
+pub const MOUSEEVENTF_XDOWN: u32 = 0x0080;
+pub const MOUSEEVENTF_XUP: u32 = 0x0100;
+pub const MOUSEEVENTF_WHEEL: u32 = 0x0800;
+pub const MOUSEEVENTF_HWHEEL: u32 = 0x1000;
+pub const XBUTTON1: u32 = 0x0001;
+pub const XBUTTON2: u32 = 0x0002;
+pub const KEYEVENTF_SCANCODE: u32 = 0x0008;
 
 #[repr(C)]
 #[derive(Default)]
@@ -136,9 +155,21 @@ pub struct KEYBDINPUT {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct MOUSEINPUT {
+    pub dx: LONG,
+    pub dy: LONG,
+    pub mouse_data: DWORD,
+    pub dw_flags: DWORD,
+    pub time: DWORD,
+    pub dw_extra_info: ULONG_PTR,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub union INPUT_U {
     pub ki: KEYBDINPUT,
+    pub mi: MOUSEINPUT,
     pub pad: [u8; 32],
 }
 
@@ -325,6 +356,13 @@ extern "system" {
 extern "system" {
     pub fn SendInput(n: u32, inputs: *const INPUT, size: i32) -> u32;
     pub fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
+    pub fn SetCursorPos(x: i32, y: i32) -> BOOL;
+    pub fn OpenClipboard(hwnd: HWND) -> BOOL;
+    pub fn EmptyClipboard() -> BOOL;
+    pub fn SetClipboardData(format: u32, mem: HANDLE) -> HANDLE;
+    pub fn CloseClipboard() -> BOOL;
+    pub fn MapVirtualKeyW(code: u32, map_type: u32) -> u32;
+    pub fn SetProcessDPIAware() -> BOOL;
     pub fn DrawTextW(hdc: HDC, text: *const u16, len: i32, rect: *mut RECT, flags: u32) -> i32;
     pub fn CreateFontW(
         height: i32,
@@ -447,6 +485,252 @@ pub fn media_key(vk: u16) {
         keybd_event(vk as u8, 0, KEYEVENTF_EXTENDEDKEY, 0);
         keybd_event(vk as u8, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
     }
+}
+
+/// 绝对坐标移动鼠标（像素）
+pub fn mouse_move_to(x: i32, y: i32) {
+    unsafe {
+        SetCursorPos(x, y);
+    }
+}
+
+/// 鼠标按键：0=左 1=右 2=中 3=侧键1 4=侧键2
+pub fn mouse_button(button: i32, down: bool) {
+    let (flag, data) = match button {
+        0 => (if down { MOUSEEVENTF_LEFTDOWN } else { MOUSEEVENTF_LEFTUP }, 0),
+        1 => (if down { MOUSEEVENTF_RIGHTDOWN } else { MOUSEEVENTF_RIGHTUP }, 0),
+        2 => (if down { MOUSEEVENTF_MIDDLEDOWN } else { MOUSEEVENTF_MIDDLEUP }, 0),
+        3 => (if down { MOUSEEVENTF_XDOWN } else { MOUSEEVENTF_XUP }, XBUTTON1),
+        4 => (if down { MOUSEEVENTF_XDOWN } else { MOUSEEVENTF_XUP }, XBUTTON2),
+        _ => return,
+    };
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        u: INPUT_U {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouse_data: data,
+                dw_flags: flag,
+                time: 0,
+                dw_extra_info: 0,
+            },
+        },
+    };
+    unsafe {
+        SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 滚轮：horizontal=true 为横向滚动
+pub fn mouse_wheel(amount: i32, horizontal: bool) {
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        u: INPUT_U {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouse_data: amount as u32,
+                dw_flags: if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL },
+                time: 0,
+                dw_extra_info: 0,
+            },
+        },
+    };
+    unsafe {
+        SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 写入 Unicode 文本到剪贴板
+pub fn clipboard_set_text(text: &str) -> bool {
+    unsafe {
+        if OpenClipboard(0) == 0 {
+            return false;
+        }
+        EmptyClipboard();
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let mem = GlobalAlloc(0x0002, wide.len() * 2); // GMEM_MOVEABLE
+        if mem == 0 {
+            CloseClipboard();
+            return false;
+        }
+        let ptr = GlobalLock(mem) as *mut u16;
+        if ptr.is_null() {
+            GlobalFree(mem);
+            CloseClipboard();
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+        GlobalUnlock(mem);
+        SetClipboardData(13, mem); // CF_UNICODETEXT
+        CloseClipboard();
+        true
+    }
+}
+
+/// 扫描码方式模拟按键（Super Hotkeys：更接近物理键盘）
+pub fn key_press_scancode(vk: u16, ctrl: bool, shift: bool, alt: bool, win: bool) {
+    let scan = unsafe { MapVirtualKeyW(vk as u32, 0) } as u8;
+    unsafe {
+        if ctrl {
+            keybd_event(0x11, 0, 0, 0);
+        }
+        if shift {
+            keybd_event(0x10, 0, 0, 0);
+        }
+        if alt {
+            keybd_event(0x12, 0, 0, 0);
+        }
+        if win {
+            keybd_event(0x5B, 0, 0, 0);
+        }
+        keybd_event(0, scan, KEYEVENTF_SCANCODE, 0);
+        keybd_event(0, scan, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP, 0);
+        if win {
+            keybd_event(0x5B, 0, KEYEVENTF_KEYUP, 0);
+        }
+        if alt {
+            keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0);
+        }
+        if shift {
+            keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0);
+        }
+        if ctrl {
+            keybd_event(0x11, 0, KEYEVENTF_KEYUP, 0);
+        }
+    }
+}
+
+/// 关闭指定路径对应的进程（force=true 强制结束）
+pub fn close_app(path: &str, force: bool) -> bool {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path);
+    let cmd = if force {
+        format!("taskkill /F /IM \"{}\"", name)
+    } else {
+        format!("taskkill /IM \"{}\"", name)
+    };
+    run_hidden(&cmd)
+}
+
+#[link(name = "PowrProf")]
+extern "system" {
+    fn SetSuspendState(hibernate: BOOLEAN, force: BOOLEAN, disable_wake: BOOLEAN) -> BOOLEAN;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalAlloc(flags: u32, bytes: usize) -> HANDLE;
+    fn GlobalLock(mem: HANDLE) -> *mut c_void;
+    fn GlobalUnlock(mem: HANDLE) -> BOOL;
+    fn GlobalFree(mem: HANDLE) -> HANDLE;
+}
+
+/// 系统睡眠（支持休眠时进入休眠）
+pub fn suspend_pc() {
+    unsafe {
+        SetSuspendState(0, 0, 0);
+    }
+}
+
+/// 开启 DPI 感知，保证鼠标绝对坐标与官方一致
+pub fn set_dpi_aware() {
+    unsafe {
+        SetProcessDPIAware();
+    }
+}
+
+// ---------------- USB 设备接入监听（隐藏窗口 + WM_DEVICECHANGE） ----------------
+
+pub const WM_DEVICECHANGE: u32 = 0x0219;
+pub const DBT_DEVICEARRIVAL: usize = 0x8000;
+pub const DBT_DEVTYP_DEVICEINTERFACE: u32 = 5;
+pub const QS_ALLINPUT: u32 = 0x04FF;
+pub const WS_POPUP: u32 = 0x8000_0000;
+pub const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+
+pub type WNDPROC = extern "system" fn(HWND, u32, usize, isize) -> isize;
+
+#[repr(C)]
+pub struct WNDCLASSW {
+    pub style: u32,
+    pub lpfn_wnd_proc: Option<WNDPROC>,
+    pub cb_cls_extra: i32,
+    pub cb_wnd_extra: i32,
+    pub h_instance: HANDLE,
+    pub h_icon: HANDLE,
+    pub h_cursor: HANDLE,
+    pub hbr_background: HANDLE,
+    pub lpsz_menu_name: *const u16,
+    pub lpsz_class_name: *const u16,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct POINT {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct MSG {
+    pub hwnd: HWND,
+    pub message: u32,
+    pub w_param: usize,
+    pub l_param: isize,
+    pub time: u32,
+    pub pt: POINT,
+}
+
+#[repr(C)]
+pub struct DEV_BROADCAST_DEVICEINTERFACE_W {
+    pub size: u32,
+    pub device_type: u32,
+    pub reserved: u32,
+    pub class_guid: GUID,
+    pub name: [u16; 1],
+}
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn RegisterClassW(class: *const WNDCLASSW) -> u16;
+    pub fn CreateWindowExW(
+        ex_style: u32,
+        class_name: *const u16,
+        window_name: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        parent: HWND,
+        menu: HANDLE,
+        instance: HANDLE,
+        param: *mut c_void,
+    ) -> HWND;
+    pub fn DestroyWindow(hwnd: HWND) -> BOOL;
+    pub fn DefWindowProcW(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize;
+    pub fn RegisterDeviceNotificationW(h: HANDLE, filter: *mut c_void, flags: u32) -> HANDLE;
+    pub fn UnregisterDeviceNotification(h: HANDLE) -> BOOL;
+    pub fn MsgWaitForMultipleObjects(
+        count: u32,
+        handles: *const HANDLE,
+        wait_all: BOOL,
+        ms: u32,
+        wake_mask: u32,
+    ) -> u32;
+    pub fn PeekMessageW(msg: *mut MSG, hwnd: HWND, min: u32, max: u32, remove: u32) -> BOOL;
+    pub fn TranslateMessage(msg: *const MSG) -> BOOL;
+    pub fn DispatchMessageW(msg: *const MSG) -> isize;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn GetModuleHandleW(name: *const u16) -> HANDLE;
 }
 
 /// ShellExecuteW 打开路径/网址

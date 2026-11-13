@@ -45,6 +45,10 @@ pub struct ActionDef {
     pub settings: Value,
     pub states: Vec<StateDef>,
     pub state_index: usize,
+    /// 动作实例 ID（多动作轮播/切换等状态持久化使用）
+    pub action_id: String,
+    /// 多动作子动作（来自动作对象的 Actions 数组）
+    pub children: Vec<ActionDef>,
 }
 
 impl ActionDef {
@@ -137,6 +141,11 @@ pub fn parse_action(v: &Value) -> ActionDef {
         .map(|arr| arr.iter().map(parse_state).collect())
         .unwrap_or_default();
     let state_index = v.get("State").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+    let children = v
+        .get("Actions")
+        .and_then(|x| x.as_array())
+        .map(|arr| arr.iter().map(parse_action).collect())
+        .unwrap_or_default();
     ActionDef {
         uuid: v.get("UUID").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         name: v.get("Name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
@@ -148,6 +157,12 @@ pub fn parse_action(v: &Value) -> ActionDef {
         settings: v.get("Settings").cloned().unwrap_or(Value::Null),
         states,
         state_index,
+        action_id: v
+            .get("ActionID")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        children,
     }
 }
 
@@ -203,4 +218,43 @@ pub fn load_page_actions(dir: &Path) -> Result<BTreeMap<String, ActionDef>, Stri
         BTreeMap::new()
     };
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 多动作子项与延时解析
+    #[test]
+    fn 多动作子项解析正确() {
+        let json: Value = serde_json::from_str(
+            r#"{
+                "ActionID": "routine-1",
+                "UUID": "com.hotspot.streamdock.multiactions.routine",
+                "Name": "Multi Action",
+                "Settings": { "enablingCycle": true, "cycleNumber": 2, "cycleDelay": 500 },
+                "Actions": [
+                    {
+                        "ActionID": "child-1",
+                        "UUID": "com.hotspot.streamdock.mouse.event",
+                        "Name": "Mouse event",
+                        "Settings": { "delay": 800, "mouseEventIndex": 0, "xCoordinate": 100, "yCoordinate": 200 }
+                    },
+                    {
+                        "ActionID": "child-2",
+                        "UUID": "com.hotspot.streamdock.multiactions.delay",
+                        "Name": "Delay",
+                        "Settings": { "delay": 1000 }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let def = parse_action(&json);
+        assert_eq!(def.action_id, "routine-1");
+        assert_eq!(def.children.len(), 2);
+        assert_eq!(def.children[0].action_id, "child-1");
+        assert_eq!(def.children[0].settings.get("delay").and_then(|v| v.as_i64()), Some(800));
+        assert_eq!(def.children[1].uuid, "com.hotspot.streamdock.multiactions.delay");
+    }
 }

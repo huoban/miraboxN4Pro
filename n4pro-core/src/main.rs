@@ -40,6 +40,8 @@ fn main() {
     let profile = arg_value(&args, "--profile").map(PathBuf::from);
 
     let log_path = logging::init(!serve);
+    // 鼠标绝对坐标需要与官方一致的 DPI 感知
+    set_dpi_aware();
     // 崩溃信息写入日志，便于定位
     std::panic::set_hook(Box::new(|info| {
         crate::logging::error(format!("程序异常：{}", info));

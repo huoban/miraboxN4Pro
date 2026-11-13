@@ -19,6 +19,15 @@ pub struct HidDevice {
 
 impl HidDevice {
     pub fn open_n4pro() -> Result<Self, String> {
+        Self::open_inner(false)
+    }
+
+    /// 探测设备是否存在（静默打开后立即释放，不写日志）
+    pub fn is_present() -> bool {
+        Self::open_inner(true).is_ok()
+    }
+
+    fn open_inner(quiet: bool) -> Result<Self, String> {
         unsafe {
             let mut guid = GUID::default();
             HidD_GetHidGuid(&mut guid);
@@ -89,11 +98,13 @@ impl HidDevice {
                     0,
                 );
                 if h == INVALID_HANDLE_VALUE {
-                    crate::log_warn!(
-                        "HID 打开失败：{} 错误码 {}",
-                        path,
-                        GetLastError()
-                    );
+                    if !quiet {
+                        crate::log_warn!(
+                            "HID 打开失败：{} 错误码 {}",
+                            path,
+                            GetLastError()
+                        );
+                    }
                     continue;
                 }
                 let mut attrs = HIDD_ATTRIBUTES {
@@ -115,13 +126,15 @@ impl HidDevice {
                 let mut caps = HIDP_CAPS::default();
                 let status = HidP_GetCaps(pp, &mut caps);
                 HidD_FreePreparsedData(pp);
-                crate::log_info!(
-                    "HID 集合：UP=0x{:X} U={} OUT={} IN={}",
-                    caps.usage_page,
-                    caps.usage,
-                    caps.output_report_byte_length,
-                    caps.input_report_byte_length
-                );
+                if !quiet {
+                    crate::log_info!(
+                        "HID 集合：UP=0x{:X} U={} OUT={} IN={}",
+                        caps.usage_page,
+                        caps.usage,
+                        caps.output_report_byte_length,
+                        caps.input_report_byte_length
+                    );
+                }
                 if status < 0 || caps.usage_page != 0xFFA0 || caps.usage != 1 {
                     CloseHandle(h);
                     continue;
