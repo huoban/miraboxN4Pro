@@ -56,7 +56,8 @@ pub fn send_exit_frame_from_handler() {
 }
 
 /// 逐帧写入设备，并对图像头/结束帧做少量节流
-/// 首错即中止整批：设备断开后不再逐帧重试，避免写线程长时间滞留占用旧句柄
+/// 写失败只跳过单帧并短暂退避后继续（0.7.1 回归修复）：单帧抖动不中止整批，
+/// 避免长批次（旋钮模式触摸条+按键）因一帧超时导致整屏黑
 fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
     for frame in frames {
         if EXITING.load(Ordering::Relaxed) {
@@ -64,11 +65,12 @@ fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
         }
         if let Err(e) = dev.write_frame(frame) {
             crate::log_error!("{}", e);
-            return;
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
         }
         let tag = if frame.len() >= 9 { &frame[6..9] } else { &frame[..0] };
         if tag == b"BAT" {
-            std::thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(10));
         } else if tag == b"STP" || tag == b"CONNECT" {
             std::thread::sleep(Duration::from_millis(30));
         }
@@ -816,7 +818,7 @@ impl App {
             return;
         }
         self.key_down[index as usize] = down;
-        // 动作绑定位置与图像渲染位置分开：上排(y1)对应配置 y2，下排(y2)对应配置 y1
+        // 动作与图像同源映射：上排 1~5 → 配置 y2（槽位 11~15），下排 6~10 → 配置 y1（槽位 6~10）
         let pos = key_action_pos(index);
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
@@ -1149,7 +1151,8 @@ fn build_scene_list(cfg: &config::AppConfig, current: &Scene) -> Vec<PathBuf> {
     list
 }
 
-/// 按键动作绑定位置：与图像渲染上下互换（上排 → 配置 y2，下排 → 配置 y1）
+/// 按键动作绑定与图像渲染共用位置：上排 1~5 → 配置 y2，下排 6~10 → 配置 y1
+/// （按用户实测标定：槽位 11~15=上排/配置 y2，槽位 6~10=下排/配置 y1）
 pub fn key_action_pos(key: u8) -> String {
     if key == 0 {
         return "0,0".to_string();
@@ -1159,10 +1162,14 @@ pub fn key_action_pos(key: u8) -> String {
     format!("{},{}", x, y)
 }
 
-/// 按键编号（1..10）→ 设备图像槽位（按用户实测标定）
-/// 上排 1~5 → 6~10；下排 6~10 → 11~15（即 slot = key + 5）
+/// 按键输入编号（1..10）→ 设备图像槽位（按用户实测标定）
+/// 上排 1~5 → 槽位 11~15；下排 6~10 → 槽位 6~10
 pub fn key_slot(key: u8) -> u8 {
-    key.saturating_add(5).min(15)
+    if key <= 5 {
+        key + 10
+    } else {
+        key
+    }
 }
 
 #[cfg(test)]
@@ -1180,9 +1187,10 @@ mod tests {
 
     #[test]
     fn 按键图像槽位按行映射() {
-        assert_eq!(key_slot(1), 6);
-        assert_eq!(key_slot(5), 10);
-        assert_eq!(key_slot(6), 11);
-        assert_eq!(key_slot(10), 15);
+        // 上排 1~5 → 槽位 11~15；下排 6~10 → 槽位 6~10
+        assert_eq!(key_slot(1), 11);
+        assert_eq!(key_slot(5), 15);
+        assert_eq!(key_slot(6), 6);
+        assert_eq!(key_slot(10), 10);
     }
 }
