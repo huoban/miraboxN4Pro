@@ -56,8 +56,6 @@ pub fn send_exit_frame_from_handler() {
 }
 
 /// 逐帧写入设备，并对图像头/结束帧做少量节流
-/// 写失败只跳过单帧并短暂退避后继续（0.7.1 回归修复）：单帧抖动不中止整批，
-/// 避免长批次（旋钮模式触摸条+按键）因一帧超时导致整屏黑
 fn write_frames(dev: &HidDevice, frames: &[Vec<u8>]) {
     for frame in frames {
         if EXITING.load(Ordering::Relaxed) {
@@ -92,8 +90,6 @@ pub struct App {
     no_bgpic: bool,
     /// 设备是否处于息屏状态
     sleeping: bool,
-    /// 整页刷新请求标记：合并快速连续的切页/切场景，事件循环排空后只渲染最新状态
-    pending_refresh: bool,
     tx: Option<Sender<WriteMsg>>,
     dump: Option<std::fs::File>,
     dry_run: bool,
@@ -147,7 +143,6 @@ impl App {
             scroll_start: 0,
             no_bgpic,
             sleeping: false,
-            pending_refresh: false,
             tx: None,
             dump,
             dry_run,
@@ -370,7 +365,6 @@ impl App {
 
         if self.once {
             // 单次模式下短暂等待设备回执，便于确认命令被接收
-            self.flush_refresh();
             let deadline = Instant::now() + Duration::from_millis(1500);
             while Instant::now() < deadline {
                 match read_rx.recv_timeout(Duration::from_millis(100)) {
@@ -386,35 +380,20 @@ impl App {
             return SessionEnd::Exit;
         }
 
-        // 主事件循环：空闲时阻塞等待（事件驱动、零唤醒）；
-        // 存在刷新请求时先排空输入队列再渲染，合并快速连续操作
+        // 主事件循环：空帧=设备断开
         loop {
-            let buf = if self.pending_refresh {
-                match read_rx.try_recv() {
-                    Ok(b) => b,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        self.flush_refresh();
-                        continue;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        crate::log_warn!("HID 读线程已退出");
-                        break;
-                    }
+            match read_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(buf) if buf.is_empty() => {
+                    crate::log_warn!("HID 读取线程检测到设备断开");
+                    break;
                 }
-            } else {
-                match read_rx.recv() {
-                    Ok(b) => b,
-                    Err(_) => {
-                        crate::log_warn!("HID 读线程已退出");
-                        break;
-                    }
+                Ok(buf) => self.handle_report(&buf),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    crate::log_warn!("HID 读线程已退出");
+                    break;
                 }
-            };
-            if buf.is_empty() {
-                crate::log_warn!("HID 读取线程检测到设备断开");
-                break;
             }
-            self.handle_report(&buf);
         }
         self.end_session();
         SessionEnd::Reconnect
@@ -435,7 +414,6 @@ impl App {
         } else {
             self.refresh_all();
         }
-        self.flush_refresh();
         if self.once {
             crate::log_info!("--once：完成一次整页刷新后退出");
             return SessionEnd::Exit;
@@ -448,8 +426,6 @@ impl App {
     /// 结束会话：停止写线程、释放设备句柄
     fn end_session(&mut self) {
         SESSION_RUNNING.store(false, Ordering::SeqCst);
-        // 复位退出标记，保证重连后的会话不受上一次退出流程影响
-        EXITING.store(false, Ordering::Relaxed);
         self.tx = None;
         if let Ok(mut guard) = EXIT_DEV.lock() {
             *guard = None;
@@ -517,147 +493,20 @@ impl App {
         self.emit(frames);
     }
 
-    /// 请求整页刷新：只置标记，事件循环排空输入后统一渲染（合并快速连续操作）
+    /// 整页刷新：CLE → 触摸条 → 10 键 BAT → SETLB → STP（仅切页/启动时调用）
     fn refresh_all(&mut self) {
-        self.pending_refresh = true;
-    }
+        let mut frames = vec![protocol::cle()];
+        frames.extend(self.touchbar_frames());
 
-    /// 立即执行整页刷新：CLE → 触摸条 → 10 键 BAT → SETLB → STP
-    /// 未命中缓存的图像并行渲染（刷新期瞬时全速），完成后按序组帧
-    fn flush_refresh(&mut self) {
-        if !self.pending_refresh {
-            return;
-        }
-        self.pending_refresh = false;
-
-        let mut frames: Vec<Vec<u8>> = vec![protocol::cle()];
-
-        // 1) 收集渲染任务：缓存命中直接组装，未命中提交并行渲染
-        enum TaskKind {
-            Bar,
-            Bat,
-        }
-        struct Task {
-            slot: u8,
-            sig: String,
-            kind: TaskKind,
-            hit: bool,
-        }
-        let mut tasks: Vec<Task> = Vec::new();
-        let mut jobs: Vec<(usize, Box<dyn FnOnce() -> Result<Vec<u8>, String> + Send + '_>)> = Vec::new();
-
-        // 旋钮模式黑色背景条不旋转、不缓存（纯黑小图直接生成）
-        if self.knob_mode && !self.no_bgpic {
-            if let Ok(black) = render_black_bar() {
-                frames.extend(protocol::bgpic_frames(&black, 800, 130));
-            }
-        }
-
-        // 触摸条：旋钮模式 1~4 区；Control Bar 单张滚动条
-        if self.knob_mode {
-            let page_dir = self.page_dir.clone();
-            let actions = self.actions.clone();
-            let page_number = (self.page_idx + 1).min(10) as u8;
-            for slot in 1u8..=4 {
-                let pos = format!("{},0", slot.saturating_sub(1));
-                let sig = format!("{}|knob|{}|{}", page_dir.display(), pos, page_number);
-                let hit = self.cache.get(&sig).is_some();
-                if !hit {
-                    let dir = page_dir.clone();
-                    let action = actions.get(&pos).cloned();
-                    let idx = tasks.len();
-                    jobs.push((
-                        idx,
-                        Box::new(move || render_knob(action.as_ref(), &dir, 0, page_number)),
-                    ));
-                }
-                tasks.push(Task { slot, sig, kind: TaskKind::Bat, hit });
-            }
-        } else if !self.no_bgpic {
-            let sig = format!(
-                "bar|{}|{}|{}",
-                self.scene.dir.display(),
-                self.scroll,
-                self.page_idx
-            );
-            let hit = self.cache.get(&sig).is_some();
-            if !hit {
-                let scene_dir = self.scene.dir.clone();
-                let items = self.scene.touchbar.clone();
-                let (scroll, show_l, show_r) = (
-                    self.scroll,
-                    self.scroll > 0,
-                    self.scroll < self.max_scroll(),
-                );
-                let idx = tasks.len();
-                jobs.push((
-                    idx,
-                    Box::new(move || render_control_bar(&items, &scene_dir, scroll, show_l, show_r)),
-                ));
-            }
-            tasks.push(Task { slot: 0, sig, kind: TaskKind::Bar, hit });
-        }
-
-        // 10 个物理按键
-        let page_dir = self.page_dir.clone();
-        let actions = self.actions.clone();
+        // 10 个物理按键（映射保持 slot = key + 5，不再改动）
         for key in 1u8..=10 {
             let slot = key_slot(key);
-            let pos = key_action_pos(key);
-            let state_idx = if self.key_down[key as usize]
-                && actions.get(&pos).map(|a| a.states.len() > 1).unwrap_or(false)
-            {
-                1
-            } else {
-                0
-            };
-            let sig = format!("{}|{}|{}", page_dir.display(), pos, state_idx);
-            let hit = self.cache.get(&sig).is_some();
-            if !hit {
-                let dir = page_dir.clone();
-                let action = actions.get(&pos).cloned();
-                let idx = tasks.len();
-                jobs.push((
-                    idx,
-                    Box::new(move || render_key(action.as_ref(), &dir, state_idx)),
-                ));
-            }
-            tasks.push(Task { slot, sig, kind: TaskKind::Bat, hit });
-        }
-
-        // 2) 并行渲染未命中的图像（刷新期允许瞬时全速）
-        let rendered = crate::render::render_parallel(jobs);
-        let mut results: Vec<Option<Vec<u8>>> = (0..tasks.len()).map(|_| None).collect();
-        for (idx, res) in rendered {
-            match res {
-                Ok(png) => results[idx] = Some(png),
-                Err(e) => crate::log_error!("图像渲染失败：{}", e),
+            let pos = key_pos(key);
+            match self.key_png(&pos, key) {
+                Ok(png) => frames.extend(protocol::bat_frames(&png, slot)),
+                Err(e) => crate::log_error!("按键 {} 渲染失败：{}", key, e),
             }
         }
-
-        // 3) 按序组装帧并回填缓存（命中项直接借用缓存，零拷贝）
-        for (i, task) in tasks.iter().enumerate() {
-            let png: &[u8] = if let Some(v) = results[i].as_deref() {
-                v
-            } else if task.hit {
-                match self.cache.get(&task.sig) {
-                    Some(v) => v,
-                    None => continue,
-                }
-            } else {
-                continue;
-            };
-            match &task.kind {
-                TaskKind::Bar => frames.extend(protocol::bgpic_frames(png, 800, 130)),
-                TaskKind::Bat => frames.extend(protocol::bat_frames(png, task.slot)),
-            }
-            if let Some(v) = results[i].take() {
-                // Control Bar 滚动条属滚动类条目，只保留最近 2 项
-                let volatile = matches!(&task.kind, TaskKind::Bar);
-                self.cache.put(task.sig.clone(), v, volatile);
-            }
-        }
-
         frames.push(protocol::setlb());
         frames.push(protocol::stp());
         crate::log_info!(
@@ -697,8 +546,7 @@ impl App {
             self.scroll > 0,
             self.scroll < max,
         )?;
-        // 滚动条按 scroll 变化缓存，属滚动类条目（仅保留最近 2 项）
-        Ok(self.cache.put(sig, png, true))
+        Ok(self.cache.put(sig, png))
     }
 
     /// 旋钮图像（176×112），页码用于翻页动作的内置图
@@ -711,7 +559,7 @@ impl App {
         }
         let action = self.actions.get(&pos).cloned();
         let png = render_knob(action.as_ref(), &self.page_dir, 0, page_number)?;
-        Ok(self.cache.put(sig, png, false))
+        Ok(self.cache.put(sig, png))
     }
 
     fn key_png(&mut self, pos: &str, key: u8) -> Result<Vec<u8>, String> {
@@ -726,7 +574,7 @@ impl App {
         }
         let action = self.actions.get(pos).cloned();
         let png = render_key(action.as_ref(), &self.page_dir, state_idx)?;
-        Ok(self.cache.put(sig, png, false))
+        Ok(self.cache.put(sig, png))
     }
 
     /// 处理一帧输入报告
@@ -818,7 +666,7 @@ impl App {
             return;
         }
         self.key_down[index as usize] = down;
-        // 动作与图像同源映射：上排 1~5 → 配置 y2（槽位 11~15），下排 6~10 → 配置 y1（槽位 6~10）
+        // 动作绑定位置与图像渲染位置分开：上排(y1)对应配置 y2，下排(y2)对应配置 y1
         let pos = key_action_pos(index);
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
@@ -840,25 +688,7 @@ impl App {
                 );
             }
         }
-        // 按用户要求：普通按键操作不触发图像刷新，仅在切页时整页重绘；
-        // 例外：多状态按键（States 数 > 1）按下/抬起时重绘该键，显示对应状态图
-        let multi_state = self
-            .actions
-            .get(&pos)
-            .map(|a| a.states.len() > 1)
-            .unwrap_or(false);
-        if multi_state {
-            let slot = key_slot(index);
-            match self.key_png(&pos, index) {
-                Ok(png) => {
-                    let mut f = protocol::bat_frames(&png, slot);
-                    f.push(protocol::setlb());
-                    f.push(protocol::stp());
-                    self.emit(f);
-                }
-                Err(e) => crate::log_error!("按键 {} 状态图渲染失败：{}", index, e),
-            }
-        }
+        // 按用户要求：按键操作不触发图像刷新，仅在切页时整页重绘
     }
 
     fn on_dial_rotate(&mut self, id: u8, dir: i8) {
@@ -1151,8 +981,17 @@ fn build_scene_list(cfg: &config::AppConfig, current: &Scene) -> Vec<PathBuf> {
     list
 }
 
-/// 按键动作绑定与图像渲染共用位置：上排 1~5 → 配置 y2，下排 6~10 → 配置 y1
-/// （按用户实测标定：槽位 11~15=上排/配置 y2，槽位 6~10=下排/配置 y1）
+/// 按键编号（1..10）→ 配置位置（图像渲染用：上排 y1、下排 y2）
+pub fn key_pos(key: u8) -> String {
+    if key == 0 {
+        return "0,0".to_string();
+    }
+    let x = (key - 1) % 5;
+    let y = if key <= 5 { 1 } else { 2 };
+    format!("{},{}", x, y)
+}
+
+/// 按键动作绑定位置：与图像渲染上下互换（上排 → 配置 y2，下排 → 配置 y1）
 pub fn key_action_pos(key: u8) -> String {
     if key == 0 {
         return "0,0".to_string();
@@ -1162,35 +1001,8 @@ pub fn key_action_pos(key: u8) -> String {
     format!("{},{}", x, y)
 }
 
-/// 按键输入编号（1..10）→ 设备图像槽位（按用户实测标定）
-/// 上排 1~5 → 槽位 11~15；下排 6~10 → 槽位 6~10
+/// 按键编号（1..10）→ 设备图像槽位（按用户实测标定）
+/// 上排 1~5 → 6~10；下排 6~10 → 11~15（即 slot = key + 5）
 pub fn key_slot(key: u8) -> u8 {
-    if key <= 5 {
-        key + 10
-    } else {
-        key
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn 按键动作位置上下互换() {
-        // 上排 1~5 → 配置 y2；下排 6~10 → 配置 y1
-        assert_eq!(key_action_pos(1), "0,2");
-        assert_eq!(key_action_pos(5), "4,2");
-        assert_eq!(key_action_pos(6), "0,1");
-        assert_eq!(key_action_pos(10), "4,1");
-    }
-
-    #[test]
-    fn 按键图像槽位按行映射() {
-        // 上排 1~5 → 槽位 11~15；下排 6~10 → 槽位 6~10
-        assert_eq!(key_slot(1), 11);
-        assert_eq!(key_slot(5), 15);
-        assert_eq!(key_slot(6), 6);
-        assert_eq!(key_slot(10), 10);
-    }
+    key.saturating_add(5).min(15)
 }
