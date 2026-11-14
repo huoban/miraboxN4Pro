@@ -16,6 +16,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// 轻点兜底判定：触点最大位移（像素），超过视为滑动
+const TAP_MAX_MOVE: i32 = 12;
+/// 轻点兜底判定：最长按住时长，超过视为长按不触发
+const TAP_MAX_HOLD: Duration = Duration::from_millis(600);
+
 /// 写线程消息：整页刷新批次可被更新的一批整体替换，避免队列积压
 enum WriteMsg {
     /// 普通帧（心跳、触摸条局部刷新等）
@@ -97,6 +102,10 @@ pub struct App {
     touch_active: bool,
     touch_start: Option<(i32, i32)>,
     touch_last: (i32, i32),
+    /// 本次触摸的按下坐标与时刻（无 ARX 坐标帧时仍可用于轻点兜底）
+    touch_down: Option<(i32, Instant)>,
+    /// 本次触摸是否已收到固件 BarTap 点击帧（收到则不再走本地轻点兜底）
+    bar_tap_seen: bool,
     last_bar_render: Instant,
     no_device: bool,
     once: bool,
@@ -150,6 +159,8 @@ impl App {
             touch_active: false,
             touch_start: None,
             touch_last: (0, 0),
+            touch_down: None,
+            bar_tap_seen: false,
             last_bar_render: Instant::now(),
             no_device,
             once,
@@ -594,10 +605,12 @@ impl App {
                     self.on_dial_press(id);
                 }
             }
-            InputEvent::TouchDown => {
+            InputEvent::TouchDown { x } => {
                 self.touch_active = true;
                 self.touch_start = None;
-                self.touch_last = (0, 0);
+                self.touch_last = (x.max(0), 0);
+                self.touch_down = Some((x, Instant::now()));
+                self.bar_tap_seen = false;
                 self.scroll_start = self.scroll;
             }
             InputEvent::TouchMove { x, y } => {
@@ -609,7 +622,14 @@ impl App {
                     self.on_touch_drag();
                 }
             }
-            InputEvent::TouchUp | InputEvent::GestureEnd => self.finish_touch(),
+            InputEvent::TouchUp { x } => {
+                // 抬起帧坐标更接近最终触点，优先用它做命中判定
+                if self.touch_active && x >= 0 {
+                    self.touch_last.0 = x;
+                }
+                self.finish_touch();
+            }
+            InputEvent::GestureEnd => self.finish_touch(),
             InputEvent::ModeChanged { control_bar } => {
                 self.knob_mode = !control_bar;
                 crate::log_info!(
@@ -628,6 +648,8 @@ impl App {
 
     /// Control Bar 点击命中：index = (X + scroll - 25) / 152
     fn on_bar_tap(&mut self, code: u8, x: i32) {
+        // 收到固件点击帧即视为本次触摸已由固件识别，抬起时不再走轻点兜底
+        self.bar_tap_seen = true;
         if self.knob_mode {
             return;
         }
@@ -779,9 +801,6 @@ impl App {
             return;
         }
         self.touch_active = false;
-        let Some((sx, sy)) = self.touch_start else { return };
-        let dx = self.touch_last.0 - sx;
-        let dy = self.touch_last.1 - sy;
 
         if !self.knob_mode {
             // Control Bar：横滑滚动按钮条，抬手吸附到 152px 网格
@@ -796,8 +815,13 @@ impl App {
                     }
                 }
             }
+            self.finish_bar_tap_fallback();
             return;
         }
+
+        let Some((sx, sy)) = self.touch_start else { return };
+        let dx = self.touch_last.0 - sx;
+        let dy = self.touch_last.1 - sy;
 
         if dx.abs() > 60 && dy.abs() < 45 {
             // 旋钮模式：坐标方向与面板一致，x 增大表示向左滑
@@ -806,6 +830,40 @@ impl App {
             } else {
                 self.switch_page(-1);
             }
+        }
+    }
+
+    /// 轻点兜底：固件在触摸感应区分界附近可能只上报触摸按下/抬起、不生成 BarTap 点击帧，
+    /// 此时按触点坐标与按住时长本地判定一次轻点，执行对应条目，保证点击不丢失
+    fn finish_bar_tap_fallback(&mut self) {
+        if self.bar_tap_seen {
+            return;
+        }
+        let Some((down_x, down_at)) = self.touch_down.take() else { return };
+        let x = self.touch_last.0;
+        if x < 0 || down_x < 0 {
+            return;
+        }
+        if (x - down_x).abs() > TAP_MAX_MOVE || down_at.elapsed() > TAP_MAX_HOLD {
+            return;
+        }
+        let count = self.scene.touchbar.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let idx = (x + self.scroll - 25) / BTN_STEP;
+        if idx < 0 || idx >= count {
+            return;
+        }
+        if let Some(def) = self.scene.touchbar.get(idx as usize).cloned() {
+            crate::log_info!(
+                "触摸兜底点击：x={} -> 第 {} 项（{}）",
+                x,
+                idx + 1,
+                def.name
+            );
+            let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
+            self.apply_effect(effect);
         }
     }
 

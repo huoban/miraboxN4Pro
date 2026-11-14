@@ -7,9 +7,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputEvent {
     Key { index: u8, down: bool },
-    TouchDown,
+    /// 触摸按下（x 为触点横坐标，固件帧缺失坐标时为 -1）
+    TouchDown { x: i32 },
     TouchMove { x: i32, y: i32 },
-    TouchUp,
+    /// 触摸抬起（x 为触点横坐标，用于轻点兜底判定）
+    TouchUp { x: i32 },
     GestureEnd,
     DialRotate { id: u8, dir: i8 },
     DialPress { id: u8, down: bool },
@@ -50,10 +52,16 @@ pub fn parse(buf: &[u8]) -> Option<InputEvent> {
         let state = data[10];
         return Some(match index {
             0 => {
-                if state == 1 {
-                    InputEvent::TouchDown
+                // 触摸按下/抬起帧同样携带触点横坐标（data[11..12]，大端）
+                let x = if data.len() >= 13 {
+                    be16(data[11], data[12])
                 } else {
-                    InputEvent::TouchUp
+                    -1
+                };
+                if state == 1 {
+                    InputEvent::TouchDown { x }
+                } else {
+                    InputEvent::TouchUp { x }
                 }
             }
             0xB1 => InputEvent::ModeChanged { control_bar: false },
@@ -108,6 +116,20 @@ mod tests {
         assert_eq!(parse(&buf), Some(InputEvent::Key { index: 1, down: true }));
         buf[10] = 0;
         assert_eq!(parse(&buf), Some(InputEvent::Key { index: 1, down: false }));
+    }
+
+    #[test]
+    fn 解析触摸按下与抬起携带坐标() {
+        // 实测帧：触摸条第 3 项区域按下与抬起，x=0x018D(397)
+        let mut buf = vec![0u8; 513];
+        buf[..15].copy_from_slice(&[
+            0x00, 0x41, 0x43, 0x4b, 0x00, 0x00, 0x4f, 0x4b, 0x00, 0x00, 0x00, 0x01, 0x01, 0x8d,
+            0x00,
+        ]);
+        assert_eq!(parse(&buf), Some(InputEvent::TouchDown { x: 397 }));
+        // 抬起帧仅 state 字段变为 0，坐标保持不变
+        buf[11] = 0x00;
+        assert_eq!(parse(&buf), Some(InputEvent::TouchUp { x: 397 }));
     }
 
     #[test]
