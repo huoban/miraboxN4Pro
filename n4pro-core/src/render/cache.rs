@@ -2,9 +2,21 @@
 
 use std::collections::HashMap;
 
-#[derive(Default)]
+/// 缓存容量上限：超出后整体清空（图像可重新渲染，避免 Control Bar 拖动时无界增长）
+const MAX_CACHE_ENTRIES: usize = 64;
+
 pub struct ImageCache {
     map: HashMap<String, Vec<u8>>,
+    max: usize,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self {
+            map: HashMap::new(),
+            max: MAX_CACHE_ENTRIES,
+        }
+    }
 }
 
 impl ImageCache {
@@ -13,6 +25,9 @@ impl ImageCache {
     }
 
     pub fn put(&mut self, key: String, png: Vec<u8>) -> Vec<u8> {
+        if self.map.len() >= self.max && !self.map.contains_key(&key) {
+            self.map.clear();
+        }
         self.map.insert(key, png.clone());
         png
     }

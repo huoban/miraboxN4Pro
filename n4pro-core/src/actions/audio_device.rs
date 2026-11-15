@@ -154,6 +154,21 @@ pub fn switch(settings: &Value, dry_run: bool) {
     let select = s_str(settings, &["select", "deviceId", "DeviceId"]).unwrap_or_default();
     let select2 = s_str(settings, &["select2", "deviceId2", "DeviceId2"]).unwrap_or_default();
 
+    if dry_run {
+        crate::log_info!(
+            "[试运行] 切换音频设备：{} / {}（数据流 {}，radio {}）",
+            select,
+            select2,
+            if flow == 0 { "播放" } else { "录音" },
+            radio
+        );
+        return;
+    }
+
+    // 先初始化 COM，再读取/设置默认设备（否则 CoCreateInstance 返回 CO_E_NOTINITIALIZED）
+    let hr = unsafe { CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED) };
+    let com_ok = hr >= 0;
+
     let mut target = select.clone();
     if radio == 0 && !select2.is_empty() {
         let current = default_device_id(flow).unwrap_or_default();
@@ -164,22 +179,15 @@ pub fn switch(settings: &Value, dry_run: bool) {
         };
     }
     if target.is_empty() {
+        if com_ok {
+            unsafe { CoUninitialize() };
+        }
         crate::log_warn!("切换音频设备缺少目标设备 ID");
         return;
     }
-    if dry_run {
-        crate::log_info!(
-            "[试运行] 切换音频设备：{}（数据流 {}，radio {}）",
-            target,
-            if flow == 0 { "播放" } else { "录音" },
-            radio
-        );
-        return;
-    }
 
-    let hr = unsafe { CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED) };
     let ok = set_default_device(&target);
-    if hr >= 0 {
+    if com_ok {
         unsafe { CoUninitialize() };
     }
     if ok {

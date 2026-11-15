@@ -26,6 +26,32 @@ fn mci(cmd: &str) -> u32 {
     unsafe { mciSendStringW(wide.as_ptr(), std::ptr::null_mut(), 0, 0) }
 }
 
+/// 查询别名当前播放模式（playing/paused/stopped 等）
+fn mci_status(alias: &str) -> Option<String> {
+    let cmd = format!("status {} mode", alias);
+    let wide = to_wide(&cmd);
+    let mut buf = vec![0u16; 128];
+    let rc = unsafe { mciSendStringW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32, 0) };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]).trim().to_lowercase())
+}
+
+/// 清理已播放结束的别名，避免列表无界增长
+fn prune_aliases() {
+    let mut guard = aliases().lock().unwrap_or_else(|e| e.into_inner());
+    guard.retain(|alias| {
+        let mode = mci_status(alias).unwrap_or_default();
+        let active = matches!(mode.as_str(), "playing" | "paused" | "seeking");
+        if !active {
+            mci(&format!("close {}", alias));
+        }
+        active
+    });
+}
+
 fn set_volume(alias: &str, volume: i64) {
     let v = volume.clamp(0, 100) * 10;
     mci(&format!("setaudio {} volume to {}", alias, v));
@@ -57,6 +83,8 @@ pub fn play(settings: &Value, dry_run: bool) {
         return;
     }
 
+    // 先清理已结束的别名，避免列表随播放次数无界增长
+    prune_aliases();
     let seq = ALIAS_SEQ.fetch_add(1, Ordering::Relaxed);
     let alias = format!("n4snd{}", seq);
     // 打开文件（MCI 按扩展名自动选择解码器）

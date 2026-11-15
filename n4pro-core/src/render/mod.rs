@@ -8,4 +8,3 @@ pub mod text;
 pub mod touchbar;
 
 pub use cache::ImageCache;
-pub use canvas::Canvas;

@@ -47,17 +47,33 @@ fn wait_child_delay(def: &ActionDef, dry_run: bool) {
     }
 }
 
-/// 依次执行子动作
+/// 把单个效果追加到组合列表（递归展开 Sequence，保持顺序）
+fn push_effect(e: Effect, out: &mut Vec<Effect>) {
+    match e {
+        Effect::None => {}
+        Effect::Sequence(mut list) => out.append(&mut list),
+        other => out.push(other),
+    }
+}
+
+/// 列表 → 单效果：空为 None，单元素直接返回，多元素组合
+fn from_list(mut list: Vec<Effect>) -> Effect {
+    match list.len() {
+        0 => Effect::None,
+        1 => list.remove(0),
+        _ => Effect::Sequence(list),
+    }
+}
+
+/// 依次执行子动作，返回全部效果（按顺序叠加，避免前面的页面/场景效果被覆盖）
 fn run_children(children: &[ActionDef], dry_run: bool, depth: u8) -> Effect {
-    let mut effect = Effect::None;
+    let mut effects = Vec::new();
     for child in children {
         wait_child_delay(child, dry_run);
         let e = execute(child, dry_run, depth + 1, Trigger::Press);
-        if e != Effect::None {
-            effect = e;
-        }
+        push_effect(e, &mut effects);
     }
-    effect
+    from_list(effects)
 }
 
 /// Multi Action（顺序执行 + 循环）
@@ -94,7 +110,7 @@ pub fn routine(def: &ActionDef, dry_run: bool, depth: u8) -> Effect {
         cycle_delay
     );
 
-    let mut effect = Effect::None;
+    let mut effects = Vec::new();
     for round in 0..rounds {
         if round > 0 && cycle_delay > 0 {
             if dry_run {
@@ -104,11 +120,9 @@ pub fn routine(def: &ActionDef, dry_run: bool, depth: u8) -> Effect {
             }
         }
         let e = run_children(&def.children, dry_run, depth);
-        if e != Effect::None {
-            effect = e;
-        }
+        push_effect(e, &mut effects);
     }
-    effect
+    from_list(effects)
 }
 
 /// Delay 动作

@@ -62,12 +62,11 @@ impl ActionPool {
         let max_idle = self.max_idle;
         thread::spawn(move || {
             let (lock, cv) = &*state;
-            let mut idle_since = Instant::now();
             loop {
                 let job = {
                     let mut s = lock.lock().unwrap_or_else(|e| e.into_inner());
                     s.idle += 1;
-                    idle_since = Instant::now();
+                    let idle_since = Instant::now();
                     loop {
                         if let Some(j) = s.queue.pop_front() {
                             s.idle -= 1;

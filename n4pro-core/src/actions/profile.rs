@@ -18,7 +18,7 @@ pub fn run(uuid: &str, settings: &Value) -> Effect {
             crate::log_warn!("进入子场景动作缺少目标 UUID");
             return Effect::None;
         }
-        return Effect::GotoPage(target);
+        return Effect::SwitchScene(target);
     }
     Effect::None
 }

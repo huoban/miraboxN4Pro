@@ -670,3 +670,231 @@ d:\Ai\N4PRO
 - 修改内容：Control Bar 滚动时两侧条目按 25/775 边界裁切显示；移除箭头与深色容器
 - 删除内容：Control Bar 左右箭头绘制、深色圆角容器背景
 - 核心影响说明：左右滑动时边缘不再出现整块空白，半显示图标与官方效果一致；滚动吸附、命中与动作执行不变
+---
+
+---
+
+### 版本号：1.0.1
+# N4 Pro Core v0.6.9 代码质量审核报告
+
+> 审核对象：`n4pro-core`（Rust，36 个源文件，约 2600 行）
+> 审核方式：逐文件人工审读 + `cargo clippy --all-targets` 静态检查
+> 编译结果：**0 error**，66 个 clippy warning（多为命名/风格类）
+> 结论：整体架构清晰（读写线程分离、动作线程池、代次丢弃迟到效果等设计合理），无内存安全（unsafe 越界/悬垂）类崩溃缺陷；但存在 **3 处逻辑接线缺陷** 和 **若干资源/内存增长风险**，需重点关注。
+
+---
+
+## 一、高危 / 中危：逻辑缺陷
+
+### 1.1 「进入子场景」动作接线错误，`Effect::SwitchScene` 为死代码
+
+**文件**：`src/actions/profile.rs`、`src/actions/mod.rs`、`src/app.rs`
+
+`profile.openchild`（进入子场景）本应触发场景切换，但实现返回的是**页面跳转**效果：
+
+```rust
+// src/actions/profile.rs:11-23
+if uuid.contains("profile.openchild") {
+    let target = s_str(settings, &["ProfileUUID", "profileUUID", ...]).unwrap_or_default();
+    ...
+    return Effect::GotoPage(target);   // ❌ 应为 Effect::SwitchScene(target)
+}
+```
+
+而 `Effect::SwitchScene(String)`（`src/actions/mod.rs:39`）**定义了却从未被构造**（clippy 已确认 `variant SwitchScene is never constructed`）。`app.rs` 里对应处理分支 `Effect::SwitchScene(uuid) => self.switch_scene(&uuid)`（`src/app.rs:986`）以及 `switch_scene()` 整段实现（`src/app.rs:1058-1079`）因此全部是死代码。
+
+**影响**：`GotoPage` 会把 `ProfileUUID` 当作「页码」或「页面名」在当前场景的 `pages` 里查找，必然落到 `未找到目标页面` 分支，**进入子场景功能完全失效**。
+
+**修复建议**：改为返回 `Effect::SwitchScene(target)`；同时确认 `switch_scene` 中 `parent.join(uuid)`（`src/app.rs:1063`）的 `uuid` 语义——当前代码假设 `uuid` 就是 `profiles/` 下的目录名，需与 manifest 中 `ProfileUUID` 的实际取值对齐。
+
+---
+
+### 1.2 音频设备切换：COM 未初始化即调用 `CoCreateInstance`
+
+**文件**：`src/actions/audio_device.rs`
+
+`switch()` 中，`radio == 0`（在两台设备间切换）时，先读取当前默认设备，再做 COM 初始化：
+
+```rust
+// src/actions/audio_device.rs:157-160
+if radio == 0 && !select2.is_empty() {
+    let current = default_device_id(flow).unwrap_or_default();  // ❌ 此处已 CoCreateInstance
+    ...
+}
+// ...
+let hr = unsafe { CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED) };  // 180 行，初始化在后面
+let ok = set_default_device(&target);
+```
+
+`default_device_id()` 内部直接调用 `CoCreateInstance`（`src/actions/audio_device.rs:93`），但动作池线程此时**尚未 `CoInitializeEx`**。在未初始化 COM 的线程上调用会返回 `CO_E_NOTINITIALIZED (0x800401F0)`。
+
+**影响**：`radio=0` 的「双设备来回切换」始终读不到当前设备，`current` 恒为空，最终恒等于固定切到 `select`，**切换（toggle）语义失效**（`radio!=0` 固定切换不受影响）。
+
+**修复建议**：把 `CoInitializeEx` 提前到 `default_device_id` 调用之前，并保证 `CoUninitialize` 与成功次数配对。
+
+---
+
+### 1.3 输入解析：`GestureEnd` 死代码，`0xB1` 语义矛盾
+
+**文件**：`src/device/input.rs`、`src/app.rs`
+
+- 文件头注释写「手势: 0xB1 触摸结束」（`src/device/input.rs:6`），但解析代码把 `0xB1/0xB2` 映射为**模式切换**：
+
+```rust
+// src/device/input.rs:67-68
+0xB1 => InputEvent::ModeChanged { control_bar: false },
+0xB2 => InputEvent::ModeChanged { control_bar: true },
+```
+
+- `InputEvent::GestureEnd`（`src/device/input.rs:15`）**从未被构造**（clippy 确认），`app.rs` 中 `InputEvent::GestureEnd => self.finish_touch()`（`src/app.rs:679`）是死代码。
+
+**影响**：触摸结束目前完全依赖 `TouchUp`（index=0,state=0）路径。若固件在部分场景只上报 `0xB1` 手势结束帧而不上报 `TouchUp`，则触摸结束不会被识别（`touch_active` 持续为真，后续 `TouchMove`/点击判定异常）。这是「注释与实现二选一必错」的不一致，需对照实机抓包确认 `0xB1` 的真实含义。
+
+**修复建议**：若 `0xB1` 实为触摸结束，改回 `GestureEnd` 并把模式切换移到其他编码；若实为模式切换，删除 `GestureEnd` 变体与其处理分支，修正注释。
+
+---
+
+## 二、内存 / 资源泄漏风险
+
+> Rust 自身内存安全，此处「泄漏」指：无界缓存增长、GDI 句柄未释放、全局列表只增不减、资源延迟释放等。
+
+### 2.1 `ImageCache` 在 Control Bar 拖动期间无界增长
+
+**文件**：`src/app.rs:570-581`、`src/render/cache.rs`
+
+`bar_png()` 的缓存键含 `self.scroll`：
+
+```rust
+let sig = format!("bar|{}|{}|{}", self.scene.dir.display(), self.scroll, self.page_idx);
+```
+
+`ImageCache` 是 `HashMap<String, Vec<u8>>`，仅在**切页 / 切模式**时 `clear()`。拖动滚动条时 `on_touch_drag` 以 60ms 节流不断写入新的 `scroll` 值（未经 152px 吸附），每次生成一张完整 800×130 PNG 并缓存。**同一页面内反复拖动会累积数十至上百张 PNG（约数十 KB/张），且不回收**。
+
+**修复建议**：为缓存设置容量上限（LRU/简单 `len()` 阈值）或在滚动时按「吸附后的格子」作键、限定缓存条目数。
+
+### 2.2 Soundboard 全局别名列表只增不减
+
+**文件**：`src/actions/soundboard.rs:82-84`、`src/actions/soundboard.rs:102-116`
+
+`play()` 每次把 alias push 进 `ALIASES`；只有 `stop_all()` 会清空。若音频**自然播放结束**（未触发「停止全部」），对应 alias 字符串永久留在 `Vec<String>` 中。长时间运行会缓慢累积。
+
+**修复建议**：监听播放完成事件移除 alias，或改用「打开→播放→关闭」的一次性 alias（非 repeat 的播放结束后主动 `close` 并出队）。
+
+### 2.3 GDI 对象未释放（画刷 / 字体 / 图标）
+
+**文件**：`src/ui.rs`
+
+- `CreateSolidBrush(0x001E1E1E)`（`src/ui.rs:223`）存入 `BG_BRUSH`，从未 `DeleteObject`；
+- `CreateFontW(...)`（`src/ui.rs:283`）返回的字体从未 `DeleteObject`；
+- `LoadIconW` 图标未释放（系统图标可接受，自有图标需 `DestroyIcon`）。
+
+窗口为进程级常驻，泄漏量固定（各 1 个），**属轻微**，但不符合规范。建议在 `WM_DESTROY` / 退出路径释放。
+
+### 2.4 剪贴板写入失败路径泄漏全局内存
+
+**文件**：`src/platform/win.rs:629-653`
+
+`clipboard_set_text` 中，`SetClipboardData` 的返回值未检查；若设置失败，已 `GlobalAlloc` 的 `mem` 既未被系统接管也未被 `GlobalFree`，发生一次 `GMEM_MOVEABLE` 泄漏。概率极低，但属遗漏。
+
+### 2.5 会话结束后的线程 / 设备句柄延迟释放
+
+**文件**：`src/app.rs:371-381`、`src/app.rs:464-472`
+
+心跳线程持有 `write_tx`（`Sender<WriteMsg>`）的一个 clone，`end_session()` 仅把 `self.tx = None` 丢弃主线程持有的那份。心跳线程每 2 秒才醒来检查 `SESSION_RUNNING`，因此**写线程（及其持有的 `Arc<HidDevice>` 设备句柄）在会话结束后最多再存活约 2 秒**才随 channel 断开退出。重连场景下旧句柄延迟释放。
+
+**修复建议**：心跳线程同时监听 `write_rx` 断开（改用 `send` 失败即退出已覆盖）；可显式让写线程在收到断开标记时立即 `drop`，或缩短心跳判定周期。
+
+---
+
+## 三、并发 / 健壮性
+
+### 3.1 多动作 `run_children` 只保留最后一个页面效果
+
+**文件**：`src/actions/multi.rs:51-61`
+
+```rust
+for child in children {
+    ...
+    let e = execute(child, ...);
+    if e != Effect::None { effect = e; }   // 覆盖式，前面的效果丢失
+}
+```
+
+若一个 routine 内含「下一页 + 下一页」两个子动作，最终只返回一次 `NextPage`，**只翻一页**。同理，多个页面/场景类子动作会互相覆盖。
+
+**修复建议**：返回 `Vec<Effect>` 或让 `Effect` 支持叠加；至少对页面导航类做累计。
+
+### 3.2 `routine` 无限循环上限仍偏大
+
+**文件**：`src/actions/multi.rs:79-84`
+
+`cycleMode=1` 的无限循环被硬限制为 1000 轮。若子动作含长延时（实测可到 230s），1000 轮可持续数小时，长期占用一个动作池线程。上限方向正确，但建议配合总时长上限或可取消机制。
+
+### 3.3 `EXITING` 标志不复位
+
+**文件**：`src/app.rs:51`、`src/app.rs:72`
+
+`EXITING` 置位后永不复位。`write_frames` 见其为真即停止发送。对「退出」路径无害，但 `send_exit_frame_from_handler` 也被 `--probe` / `--once` 复用，若未来在会话中途触发而未退出进程，将永久停发帧。建议改为会话级状态或显式复位。
+
+### 3.4 写线程 `Refresh` 合并会丢弃中间普通帧
+
+**文件**：`src/app.rs:303-321`
+
+处理 `WriteMsg::Refresh` 时 `try_recv` 排空队列：遇到新的 `Refresh` 会 `tail.clear()`，导致两次整页刷新**之间**的普通帧（如心跳 `RGBS`、`CONNECT`）被一并丢弃。当前丢弃的主要是心跳帧，影响不大，但逻辑上「保留刷新批次之后的帧」这一注释与实际（清空 tail）不符，需留意。
+
+### 3.5 读线程 `INFINITE` 阻塞（理论风险）
+
+**文件**：`src/device/hid.rs:233`
+
+`read_report` 用 `WaitForSingleObject(..., INFINITE)`。若设备拔出时挂起的重叠读未完成（极端固件行为），读线程将永久阻塞，且其持有的 `Arc<HidDevice>` 不会释放（`Drop` 无法执行，句柄泄漏）。正常情况下 HID 拔出会完成挂起读，此条为兜底建议：改用有限超时 + 句柄失效检测。
+
+---
+
+## 四、死代码 / 未使用项（clippy 确认）
+
+| 位置 | 项 | 说明 |
+|---|---|---|
+| `src/actions/mod.rs:26` | `Trigger::LongPress` | 从未构造，长按未实现 |
+| `src/actions/mod.rs:39` | `Effect::SwitchScene` | 见 §1.1，接线缺失 |
+| `src/device/input.rs:15` | `InputEvent::GestureEnd` | 见 §1.3 |
+| `src/device/protocol.rs:56/67` | `lblig()` / `qucmd()` | 未使用 |
+| `src/config/manifest.rs:44` | `ActionDef.controller` | 解析后从未读取 |
+| `src/config/manifest.rs:72-74` | `Scene.device_uuid/device_serial` | 从未读取（`build_scene_list` 直接重读 manifest） |
+| `src/config/resolve.rs:9` | `AppConfig.ini_path` | 从未读取 |
+| `src/config/ini.rs:58/63` | `section_exists/section_names` | 未使用 |
+| `src/config/mod.rs:7`、`src/device/mod.rs:8`、`src/render/mod.rs:11`、`src/ui.rs:7` | 多余 `pub use` | `StateDef` / `InputEvent` / `Canvas` / `SyncSender` |
+| `src/pool.rs:65` | `idle_since` 初值 | 立即被 `pool.rs:70` 覆盖，冗余赋值 |
+
+---
+
+## 五、代码风格（clippy 66 项 warning）
+
+主要类别（均可由 `cargo clippy --fix` 部分自动修复）：
+
+- **命名规范**：`win.rs` 中大量 Win32 类型名（`ULONG_PTR`、`WNDPROC`、`WNDCLASSW`、`POINT`、`MSG`、`NOTIFYICONDATAW`）触发 upper-case-acronym 警告（FFI 绑定属预期，可加 `#[allow]`）；测试函数中文名触发 `non_snake_case`。
+- **参数过多**：`draw_text`（9/7）、`draw_text_rect`（13/7）。
+- **可读性**：`ui.rs:103` 的 `loop { match rx.try_recv() }` 可写为 `while let`；`ui.rs:226` 的 `1usize as *const u16` 建议 `std::ptr::dangling`；`canvas.rs:49` 循环可用迭代器。
+- **冗余**：`run_hidden` 中 `STARTUPINFO` 先用 `Default` 再逐字段赋值。
+
+---
+
+## 六、总体结论
+
+**优点**：
+- 线程模型清晰（HID 读/写独立常驻 + 动作线程池），长动作不阻塞输入；
+- 「页面代次 + 迟到效果丢弃」机制避免了切页竞态；
+- `unsafe` FFI 结构体布局（`OVERLAPPED`、`GUID`、`HIDP_CAPS`、`INPUT` 等）经核对与 Win32 定义一致，未见内存安全缺陷；
+- 输入/协议/渲染模块均有单元测试，且 `cargo clippy` 通过（0 error）。
+
+**必须修复（建议优先级 P0-P1）**：
+1. `profile.openchild` → `Effect::SwitchScene` 接线（§1.1）；
+2. 音频切换 COM 初始化顺序（§1.2）；
+3. `0xB1` 语义 / `GestureEnd` 死代码澄清（§1.3）。
+
+**建议修复（P2）**：
+- `ImageCache` 容量上限（§2.1）；
+- Soundboard 别名回收（§2.2）；
+- `run_children` 效果叠加（§3.1）；
+- GDI 对象与剪贴板失败路径释放（§2.3 / §2.4）。
+
+其余为健壮性加固与代码整洁项，可按排期逐步清理（`cargo clippy --fix` 可先消化 7 处）。

@@ -646,9 +646,13 @@ pub fn clipboard_set_text(text: &str) -> bool {
         }
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         GlobalUnlock(mem);
-        SetClipboardData(13, mem); // CF_UNICODETEXT
+        // 设置失败时系统未接管内存，需自行释放，避免泄漏
+        let set = SetClipboardData(13, mem); // CF_UNICODETEXT
+        if set == 0 {
+            GlobalFree(mem);
+        }
         CloseClipboard();
-        true
+        set != 0
     }
 }
 

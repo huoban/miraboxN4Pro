@@ -10,7 +10,7 @@ use crate::render::ImageCache;
 use std::collections::{BTreeMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -294,6 +294,8 @@ impl App {
             *guard = Some(Arc::clone(&dev));
         }
         SESSION_RUNNING.store(true, Ordering::SeqCst);
+        // 新会话复位退出标记，避免复用退出回调后写线程永久停发
+        EXITING.store(false, Ordering::SeqCst);
 
         let dev_writer = Arc::clone(&dev);
         std::thread::spawn(move || {
@@ -676,7 +678,6 @@ impl App {
                 }
                 self.finish_touch();
             }
-            InputEvent::GestureEnd => self.finish_touch(),
             InputEvent::ModeChanged { control_bar } => {
                 self.knob_mode = !control_bar;
                 crate::log_info!(
@@ -986,6 +987,11 @@ impl App {
             Effect::SwitchScene(uuid) => self.switch_scene(&uuid),
             Effect::BrightnessDelta(delta) => self.adjust_brightness(delta),
             Effect::DeviceSleepToggle => self.toggle_device_sleep(),
+            Effect::Sequence(list) => {
+                for e in list {
+                    self.apply_effect(e);
+                }
+            }
         }
     }
 
@@ -1060,11 +1066,10 @@ impl App {
             crate::log_warn!("无法定位场景根目录");
             return;
         };
-        let target = parent.join(uuid);
-        if !target.join("manifest.json").exists() {
-            crate::log_warn!("目标场景不存在：{}", target.display());
+        let Some(target) = resolve_scene_dir(parent, uuid) else {
+            crate::log_warn!("目标场景不存在：{}", uuid);
             return;
-        }
+        };
         match config::load_scene(&target) {
             Ok(scene) => {
                 crate::log_info!("切换场景：{}", scene.name);
@@ -1134,6 +1139,43 @@ fn build_scene_list(cfg: &config::AppConfig, current: &Scene) -> Vec<PathBuf> {
         list.push(current.dir.clone());
     }
     list
+}
+
+/// 根据 UUID/名称/目录名解析子场景目录：
+/// 先按目录名直连（含 .sdProfile 后缀），再扫描 profiles 下 manifest 的 Name/DeviceUUID 匹配
+fn resolve_scene_dir(parent: &Path, uuid: &str) -> Option<PathBuf> {
+    let direct = parent.join(uuid);
+    if direct.join("manifest.json").exists() {
+        return Some(direct);
+    }
+    let with_ext = parent.join(format!("{}.sdProfile", uuid));
+    if with_ext.join("manifest.json").exists() {
+        return Some(with_ext);
+    }
+    let rd = std::fs::read_dir(parent).ok()?;
+    for entry in rd.flatten() {
+        let path = entry.path();
+        if !path.is_dir()
+            || !path
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("sdProfile"))
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path.join("manifest.json")) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let name = json.get("Name").and_then(|v| v.as_str()).unwrap_or("");
+        let dev = json.get("DeviceUUID").and_then(|v| v.as_str()).unwrap_or("");
+        if name.eq_ignore_ascii_case(uuid) || dev.eq_ignore_ascii_case(uuid) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// 按键编号（1..10）→ 配置位置（图像渲染用：上排 y1、下排 y2）

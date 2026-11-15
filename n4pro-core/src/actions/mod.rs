@@ -41,6 +41,8 @@ pub enum Effect {
     BrightnessDelta(i32),
     /// 切换设备息屏
     DeviceSleepToggle,
+    /// 组合效果（多动作按顺序依次应用）
+    Sequence(Vec<Effect>),
 }
 
 /// 读取字符串设置（多个候选键）

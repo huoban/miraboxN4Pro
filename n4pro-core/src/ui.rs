@@ -4,7 +4,7 @@
 use crate::platform::win::*;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::{Mutex, OnceLock};
 
 const WM_TRAY: u32 = WM_APP + 1;
@@ -319,6 +319,9 @@ unsafe fn run_window(show_initial: bool) {
     }
     KillTimer(hwnd, 1);
     Shell_NotifyIconW(NIM_DELETE, &mut data);
+    // 释放 GDI 资源（画刷/字体），避免泄漏
+    DeleteObject(font);
+    DeleteObject(brush);
 }
 
 /// 启动日志窗口与托盘；show_initial=false 时仅托盘可见

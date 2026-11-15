@@ -5,4 +5,3 @@ pub mod input;
 pub mod protocol;
 
 pub use hid::HidDevice;
-pub use input::InputEvent;

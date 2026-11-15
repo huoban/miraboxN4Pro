@@ -2,7 +2,7 @@
 // 按键:   "ACK" 00 00 "OK" 00 00 idx state      idx 1..10
 // 触摸:   idx=0 按下/松开；坐标走 "ACK" 00 "ARX" ... x:BE16 y:BE16
 // 旋钮:   0xA1.. 旋转；0x37.. 按下/松开（旋钮 1 实测）
-// 手势:   0xB1 触摸结束
+// 模式:   0xB1/0xB2 固件切换触摸条模式（0xB1=旋钮，0xB2=Control Bar）
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputEvent {
@@ -12,7 +12,6 @@ pub enum InputEvent {
     TouchMove { x: i32, y: i32 },
     /// 触摸抬起（x 为触点横坐标，用于轻点兜底判定）
     TouchUp { x: i32 },
-    GestureEnd,
     DialRotate { id: u8, dir: i8 },
     DialPress { id: u8, down: bool },
     /// 固件切换触摸条模式：true=Control Bar，false=旋钮模式
