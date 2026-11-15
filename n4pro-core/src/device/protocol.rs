@@ -151,10 +151,11 @@ pub fn bgpic_frames(png: &[u8], width: u16, height: u16) -> Vec<Vec<u8>> {
     for (i, b) in b"BGPIC".iter().enumerate() {
         payload[CMD_OFFSET + i] = *b;
     }
-    // 官方抓包：长度 24 位大端在 [10..12]，[13..16] 为偏移（整图发送时全 0）
-    payload[10] = ((len >> 16) & 0xFF) as u8;
-    payload[11] = ((len >> 8) & 0xFF) as u8;
-    payload[12] = (len & 0xFF) as u8;
+    // 官方抓包：载荷[10]=0x00，长度 24 位大端在 [11..13]，[14..17] 为偏移（整图发送时全 0）
+    payload[10] = 0x00;
+    payload[11] = ((len >> 16) & 0xFF) as u8;
+    payload[12] = ((len >> 8) & 0xFF) as u8;
+    payload[13] = (len & 0xFF) as u8;
     payload[18] = ((width >> 8) & 0xFF) as u8;
     payload[19] = (width & 0xFF) as u8;
     payload[20] = ((height >> 8) & 0xFF) as u8;
@@ -211,7 +212,7 @@ mod tests {
         let frames = bgpic_frames(&data, 800, 130);
         // 1 个头帧 + ceil(3000/1024)=3 个数据帧
         assert_eq!(frames.len(), 4);
-        let len = ((frames[0][11] as u32) << 16) | ((frames[0][12] as u32) << 8) | frames[0][13] as u32;
+        let len = ((frames[0][12] as u32) << 16) | ((frames[0][13] as u32) << 8) | frames[0][14] as u32;
         assert_eq!(len, 3000);
         assert_eq!(frames[0][19], 0x03); // 宽 800 高字节
         assert_eq!(frames[0][20], 0x20); // 宽 800 低字节

@@ -568,7 +568,6 @@ impl App {
 
     /// Control Bar 整条图像（800×130）
     fn bar_png(&mut self) -> Result<Vec<u8>, String> {
-        let max = self.max_scroll();
         let sig = format!(
             "bar|{}|{}|{}",
             self.scene.dir.display(),
@@ -578,13 +577,7 @@ impl App {
         if let Some(v) = self.cache.get(&sig) {
             return Ok(v.clone());
         }
-        let png = render_control_bar(
-            &self.scene.touchbar,
-            &self.scene.dir,
-            self.scroll,
-            self.scroll > 0,
-            self.scroll < max,
-        )?;
+        let png = render_control_bar(&self.scene.touchbar, &self.scene.dir, self.scroll)?;
         Ok(self.cache.put(sig, png))
     }
 
