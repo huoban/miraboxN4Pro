@@ -407,8 +407,7 @@ impl App {
                     Err(e) => crate::log_error!("槽位 {} 标定图失败：{}", slot, e),
                 }
             }
-            let colors = self.knob_colors();
-            frames.push(protocol::setlb(colors));
+            frames.push(protocol::setlb());
             frames.push(protocol::stp());
             crate::log_info!("槽位标定模式：已发送 1~15 编号图");
             self.emit(frames);
@@ -468,8 +467,7 @@ impl App {
                     frames.extend(protocol::bat_frames(&png, slot));
                 }
             }
-            let colors = self.knob_colors();
-            frames.push(protocol::setlb(colors));
+            frames.push(protocol::setlb());
             frames.push(protocol::stp());
             self.emit(frames);
         } else {
@@ -554,8 +552,7 @@ impl App {
     /// 只刷新触摸条（模式切换 / 滑动时使用，不动按键）
     fn refresh_touchbar(&mut self) {
         let mut frames = self.touchbar_frames();
-        let colors = self.knob_colors();
-        frames.push(protocol::setlb(colors));
+        frames.push(protocol::setlb());
         frames.push(protocol::stp());
         crate::log_info!("触摸条刷新，共 {} 帧", frames.len());
         self.emit(frames);
@@ -575,8 +572,7 @@ impl App {
                 Err(e) => crate::log_error!("按键 {} 渲染失败：{}", key, e),
             }
         }
-        let colors = self.knob_colors();
-        frames.push(protocol::setlb(colors));
+        frames.push(protocol::setlb());
         frames.push(protocol::stp());
         crate::log_info!(
             "整页刷新完成，共 {} 帧（{}）",
@@ -609,18 +605,6 @@ impl App {
         }
         let png = render_control_bar(&self.scene.touchbar, &self.scene.dir, self.scroll)?;
         Ok(self.cache.put(sig, png))
-    }
-
-    /// 旋钮模式 4 个翻页键的标题颜色，缺省为官方默认四色
-    fn knob_colors(&self) -> [[u8; 3]; 4] {
-        let mut out = [[255, 0, 0], [0, 170, 0], [255, 255, 127], [0, 85, 255]];
-        for id in 1u8..=4 {
-            let pos = format!("{},0", id - 1);
-            if let Some(a) = self.actions.get(&pos) {
-                out[(id - 1) as usize] = a.state().title_color;
-            }
-        }
-        out
     }
 
     /// 旋钮图像（176×112），页码用于翻页动作的内置图

@@ -98,19 +98,10 @@ pub fn cle() -> Vec<u8> {
     frame_from(payload)
 }
 
-/// 设置 4 个旋钮键标题颜色：官方 SETLB 后 12 字节为四组 RGB
-pub fn setlb(colors: [[u8; 3]; 4]) -> Vec<u8> {
-    let mut payload = [0u8; PAYLOAD_LEN];
-    header(&mut payload);
-    for (i, b) in b"SETLB".iter().enumerate() {
-        payload[CMD_OFFSET + i] = *b;
-    }
-    for (i, c) in colors.iter().enumerate() {
-        payload[10 + i * 3] = c[0];
-        payload[11 + i * 3] = c[1];
-        payload[12 + i * 3] = c[2];
-    }
-    frame_from(payload)
+/// 提交标签层。官方抓包 SETLB 参数恒为全 0（主机不下发旋钮颜色），
+/// 旋钮 RGB 灯效由设备固件自行维持（渐变等效果），主机侧不应覆盖。
+pub fn setlb() -> Vec<u8> {
+    command("SETLB")
 }
 
 pub fn stp() -> Vec<u8> {
@@ -224,13 +215,10 @@ mod tests {
     }
 
     #[test]
-    fn 标签颜色帧写入四组RGB() {
-        let f = setlb([[255, 0, 0], [0, 170, 0], [255, 255, 127], [0, 85, 255]]);
+    fn setlb_帧参数为空与官方一致() {
+        let f = setlb();
         assert_eq!(&f[6..11], b"SETLB");
-        assert_eq!(
-            &f[11..23],
-            &[255, 0, 0, 0, 170, 0, 255, 255, 127, 0, 85, 255]
-        );
+        assert_eq!(&f[11..23], &[0u8; 12]);
     }
 
     #[test]
