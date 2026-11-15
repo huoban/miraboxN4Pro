@@ -83,7 +83,8 @@ pub fn bgcle(mode: u8) -> Vec<u8> {
     for (i, b) in b"BGCLE".iter().enumerate() {
         payload[CMD_OFFSET + i] = *b;
     }
-    payload[10] = mode;
+    // 官方抓包：BGCLE 参数位于 [11]（[10] 恒为 0）
+    payload[11] = mode;
     frame_from(payload)
 }
 
@@ -97,8 +98,19 @@ pub fn cle() -> Vec<u8> {
     frame_from(payload)
 }
 
-pub fn setlb() -> Vec<u8> {
-    command("SETLB")
+/// 设置 4 个旋钮键标题颜色：官方 SETLB 后 12 字节为四组 RGB
+pub fn setlb(colors: [[u8; 3]; 4]) -> Vec<u8> {
+    let mut payload = [0u8; PAYLOAD_LEN];
+    header(&mut payload);
+    for (i, b) in b"SETLB".iter().enumerate() {
+        payload[CMD_OFFSET + i] = *b;
+    }
+    for (i, c) in colors.iter().enumerate() {
+        payload[10 + i * 3] = c[0];
+        payload[11 + i * 3] = c[1];
+        payload[12 + i * 3] = c[2];
+    }
+    frame_from(payload)
 }
 
 pub fn stp() -> Vec<u8> {
@@ -139,10 +151,10 @@ pub fn bgpic_frames(png: &[u8], width: u16, height: u16) -> Vec<Vec<u8>> {
     for (i, b) in b"BGPIC".iter().enumerate() {
         payload[CMD_OFFSET + i] = *b;
     }
-    payload[10] = 0x00;
-    payload[11] = ((len >> 16) & 0xFF) as u8;
-    payload[12] = ((len >> 8) & 0xFF) as u8;
-    payload[13] = (len & 0xFF) as u8;
+    // 官方抓包：长度 24 位大端在 [10..12]，[13..16] 为偏移（整图发送时全 0）
+    payload[10] = ((len >> 16) & 0xFF) as u8;
+    payload[11] = ((len >> 8) & 0xFF) as u8;
+    payload[12] = (len & 0xFF) as u8;
     payload[18] = ((width >> 8) & 0xFF) as u8;
     payload[19] = (width & 0xFF) as u8;
     payload[20] = ((height >> 8) & 0xFF) as u8;
@@ -199,12 +211,22 @@ mod tests {
         let frames = bgpic_frames(&data, 800, 130);
         // 1 个头帧 + ceil(3000/1024)=3 个数据帧
         assert_eq!(frames.len(), 4);
-        let len = ((frames[0][12] as u32) << 16) | ((frames[0][13] as u32) << 8) | frames[0][14] as u32;
+        let len = ((frames[0][11] as u32) << 16) | ((frames[0][12] as u32) << 8) | frames[0][13] as u32;
         assert_eq!(len, 3000);
         assert_eq!(frames[0][19], 0x03); // 宽 800 高字节
         assert_eq!(frames[0][20], 0x20); // 宽 800 低字节
         assert_eq!(frames[0][22], 130); // 高
         assert_eq!(&frames[1][1..5], &data[..4]);
+    }
+
+    #[test]
+    fn 标签颜色帧写入四组RGB() {
+        let f = setlb([[255, 0, 0], [0, 170, 0], [255, 255, 127], [0, 85, 255]]);
+        assert_eq!(&f[6..11], b"SETLB");
+        assert_eq!(
+            &f[11..23],
+            &[255, 0, 0, 0, 170, 0, 255, 255, 127, 0, 85, 255]
+        );
     }
 
     #[test]

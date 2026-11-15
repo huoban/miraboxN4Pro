@@ -365,7 +365,8 @@ impl App {
                     Err(e) => crate::log_error!("槽位 {} 标定图失败：{}", slot, e),
                 }
             }
-            frames.push(protocol::setlb());
+            let colors = self.knob_colors();
+            frames.push(protocol::setlb(colors));
             frames.push(protocol::stp());
             crate::log_info!("槽位标定模式：已发送 1~15 编号图");
             self.emit(frames);
@@ -419,7 +420,8 @@ impl App {
                     frames.extend(protocol::bat_frames(&png, slot));
                 }
             }
-            frames.push(protocol::setlb());
+            let colors = self.knob_colors();
+            frames.push(protocol::setlb(colors));
             frames.push(protocol::stp());
             self.emit(frames);
         } else {
@@ -498,7 +500,8 @@ impl App {
     /// 只刷新触摸条（模式切换 / 滑动时使用，不动按键）
     fn refresh_touchbar(&mut self) {
         let mut frames = self.touchbar_frames();
-        frames.push(protocol::setlb());
+        let colors = self.knob_colors();
+        frames.push(protocol::setlb(colors));
         frames.push(protocol::stp());
         crate::log_info!("触摸条刷新，共 {} 帧", frames.len());
         self.emit(frames);
@@ -518,7 +521,8 @@ impl App {
                 Err(e) => crate::log_error!("按键 {} 渲染失败：{}", key, e),
             }
         }
-        frames.push(protocol::setlb());
+        let colors = self.knob_colors();
+        frames.push(protocol::setlb(colors));
         frames.push(protocol::stp());
         crate::log_info!(
             "整页刷新完成，共 {} 帧（{}）",
@@ -560,6 +564,18 @@ impl App {
         Ok(self.cache.put(sig, png))
     }
 
+    /// 旋钮模式 4 个翻页键的标题颜色，缺省为官方默认四色
+    fn knob_colors(&self) -> [[u8; 3]; 4] {
+        let mut out = [[255, 0, 0], [0, 170, 0], [255, 255, 127], [0, 85, 255]];
+        for id in 1u8..=4 {
+            let pos = format!("{},0", id - 1);
+            if let Some(a) = self.actions.get(&pos) {
+                out[(id - 1) as usize] = a.state().title_color;
+            }
+        }
+        out
+    }
+
     /// 旋钮图像（176×112），页码用于翻页动作的内置图
     fn knob_png(&mut self, id: u8) -> Result<Vec<u8>, String> {
         let pos = format!("{},0", id.saturating_sub(1));
@@ -586,6 +602,20 @@ impl App {
         let action = self.actions.get(pos).cloned();
         let png = render_key(action.as_ref(), &self.page_dir, state_idx)?;
         Ok(self.cache.put(sig, png))
+    }
+
+    /// 单键刷新：BAT 后立即 STP（官方单键更新时序）
+    fn refresh_key(&mut self, key: u8) {
+        let slot = key_slot(key);
+        let pos = key_pos(key);
+        match self.key_png(&pos, key) {
+            Ok(png) => {
+                let mut frames = protocol::bat_frames(&png, slot);
+                frames.push(protocol::stp());
+                self.emit(frames);
+            }
+            Err(e) => crate::log_error!("按键 {} 刷新失败：{}", key, e),
+        }
     }
 
     /// 处理一帧输入报告
@@ -690,6 +720,15 @@ impl App {
         self.key_down[index as usize] = down;
         // 动作绑定位置与图像渲染位置分开：上排(y1)对应配置 y2，下排(y2)对应配置 y1
         let pos = key_action_pos(index);
+        // 多状态键按下/抬起时立即刷新该键（BAT → STP）
+        if self
+            .actions
+            .get(&pos)
+            .map(|a| a.states.len() > 1)
+            .unwrap_or(false)
+        {
+            self.refresh_key(index);
+        }
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
                 crate::log_info!(
