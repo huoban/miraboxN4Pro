@@ -1,6 +1,7 @@
 // 热键动作：解析 Settings.Hotkeys[]，支持左右修饰键、Alt(KeyOption) 与多主键组合
 // 统一使用扫描码发送，兼容普通窗口与游戏
 
+use crate::actions::s_i64;
 use crate::platform::win::{send_hotkey, Mods};
 use serde_json::Value;
 
@@ -14,11 +15,12 @@ fn parse_mods(entry: &Value) -> Mods {
         ctrl: flag(entry, "KeyCtrl"),
         shift: flag(entry, "KeyShift"),
         alt: flag(entry, "KeyOption") || flag(entry, "KeyAlt"),
-        win: flag(entry, "KeyCmd"),
+        // 文档 05 官方字段为 KeyWin/RKeyWin；同时兼容旧实现的 KeyCmd/RKeyCmd 写法
+        win: flag(entry, "KeyWin") || flag(entry, "KeyCmd"),
         r_ctrl: flag(entry, "RKeyCtrl"),
         r_shift: flag(entry, "RKeyShift"),
         r_alt: flag(entry, "RKeyOption") || flag(entry, "RKeyAlt"),
-        r_win: flag(entry, "RKeyCmd"),
+        r_win: flag(entry, "RKeyWin") || flag(entry, "RKeyCmd"),
     }
 }
 
@@ -120,7 +122,11 @@ pub fn run(settings: &Value, dry_run: bool) {
         crate::log_warn!("热键动作缺少 Hotkeys 配置");
         return;
     };
-    for entry in list {
-        send_entry(entry, dry_run);
+    // 普通热键同样支持 executionTimes 重复执行次数（与 Super Hotkeys 一致，上限 20）
+    let times = s_i64(settings, &["executionTimes", "times"]).unwrap_or(1).clamp(1, 20);
+    for _ in 0..times {
+        for entry in list {
+            send_entry(entry, dry_run);
+        }
     }
 }

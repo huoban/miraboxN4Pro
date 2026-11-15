@@ -302,6 +302,7 @@ extern "system" {
         transferred: *mut u32,
         wait: BOOL,
     ) -> BOOL;
+    pub fn CancelIo(h: HANDLE) -> BOOL;
     pub fn CreateProcessW(
         app_name: *const u16,
         cmd_line: *mut u16,

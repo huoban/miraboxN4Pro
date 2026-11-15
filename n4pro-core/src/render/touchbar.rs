@@ -73,6 +73,7 @@ pub fn render_black_bar() -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

@@ -179,6 +179,8 @@ pub fn bat_frames(png: &[u8], index: u8) -> Vec<Vec<u8>> {
     payload[10] = ((len >> 8) & 0xFF) as u8;
     payload[11] = (len & 0xFF) as u8;
     payload[12] = index;
+    // 分片序号：整图单次发送为 0（与官方抓包一致，官方整图帧此处恒为 0）
+    payload[13] = 0;
 
     let mut frames = vec![frame_from(payload)];
     frames.extend(chunk_frames(png));
@@ -186,6 +188,7 @@ pub fn bat_frames(png: &[u8], index: u8) -> Vec<Vec<u8>> {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

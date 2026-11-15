@@ -192,6 +192,8 @@ impl HidDevice {
             }
             let wait = WaitForSingleObject(self.write_event, 2000);
             if wait != 0 {
+                // 超时后必须取消挂起的重叠写，否则异步完成时会回写已释放的栈上 OVERLAPPED（UB）
+                CancelIo(self.handle);
                 return Err("HID 写入超时".to_string());
             }
             let mut transferred = 0u32;

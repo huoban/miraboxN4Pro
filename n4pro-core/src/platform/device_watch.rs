@@ -19,7 +19,8 @@ extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: usize, l: isize) -> isize {
 }
 
 /// 阻塞等待 N4 Pro 接入（零 CPU 占用）
-pub fn wait_for_device() {
+/// `stop` 置位时立即返回（供托盘/系统退出打断等待）
+pub fn wait_for_device(stop: &AtomicBool) {
     unsafe {
         let class_name = to_wide("N4ProDeviceWatch");
         let instance = GetModuleHandleW(std::ptr::null());
@@ -73,12 +74,16 @@ pub fn wait_for_device() {
         // 避免设备仍在但打不开时形成忙循环
         std::thread::sleep(std::time::Duration::from_millis(500));
         loop {
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
             if HidDevice::is_present() {
                 break;
             }
             // 最多阻塞 2 秒；有窗口消息（含设备到达）会立即返回
+            // nCount=0 时消息到达返回 WAIT_OBJECT_0（=0），超时返回 WAIT_TIMEOUT
             let r = MsgWaitForMultipleObjects(0, std::ptr::null(), 0, 2000, QS_ALLINPUT);
-            if r == 1 {
+            if r == 0 {
                 let mut msg = MSG::default();
                 while PeekMessageW(&mut msg, 0, 0, 0, 1) != 0 {
                     TranslateMessage(&msg);

@@ -80,6 +80,7 @@ pub fn default_ini_path() -> std::path::PathBuf {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

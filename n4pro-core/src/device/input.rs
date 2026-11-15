@@ -103,6 +103,7 @@ pub fn parse(buf: &[u8]) -> Option<InputEvent> {
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

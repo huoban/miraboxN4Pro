@@ -231,6 +231,7 @@ pub fn load_page_actions(dir: &Path) -> Result<BTreeMap<String, ActionDef>, Stri
 }
 
 #[cfg(test)]
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

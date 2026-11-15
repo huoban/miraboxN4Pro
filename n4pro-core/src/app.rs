@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -50,6 +50,9 @@ static SESSION_RUNNING: AtomicBool = AtomicBool::new(false);
 /// 退出标记：置位后写线程停止发送图像帧，保证结束帧是最后一帧
 static EXITING: AtomicBool = AtomicBool::new(false);
 
+/// 托盘/控制台退出请求：主循环检测到后结束会话并优雅返回（替代直接 process::exit）
+static EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 /// 控制台退出回调：先停写线程，再直接同步写 CLE+DC 帧，避免传输中途断开
 pub fn send_exit_frame_from_handler() {
     let dev = EXIT_DEV.lock().ok().and_then(|guard| guard.clone());
@@ -64,6 +67,12 @@ pub fn send_exit_frame_from_handler() {
         // 给设备固件留出处理时间
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// 托盘/系统退出入口：发送结束帧并请求主循环优雅退出（统一走 end_session 收尾）
+pub fn graceful_exit() {
+    send_exit_frame_from_handler();
+    EXIT_REQUESTED.store(true, Ordering::SeqCst);
 }
 
 /// 逐帧写入设备，并对图像头/结束帧做少量节流
@@ -101,7 +110,7 @@ pub struct App {
     no_bgpic: bool,
     /// 设备是否处于息屏状态
     sleeping: bool,
-    tx: Option<Sender<WriteMsg>>,
+    tx: Option<SyncSender<WriteMsg>>,
     dump: Option<std::fs::File>,
     dry_run: bool,
     key_down: [bool; 11],
@@ -258,7 +267,11 @@ impl App {
                 SessionEnd::Exit => return,
                 SessionEnd::Reconnect => {
                     crate::log_warn!("设备通信中断，进入 USB 等待模式");
-                    crate::platform::device_watch::wait_for_device();
+                    crate::platform::device_watch::wait_for_device(&EXIT_REQUESTED);
+                    if EXIT_REQUESTED.load(Ordering::SeqCst) {
+                        crate::log_info!("等待期间收到退出请求");
+                        return;
+                    }
                 }
             }
         }
@@ -287,7 +300,8 @@ impl App {
         };
 
         let input_len = dev.input_len.max(513);
-        let (write_tx, write_rx) = channel::<WriteMsg>();
+        // 有界写队列：设备卡顿/断连时不再无界积压，满则丢弃新帧（由写线程快速消费）
+        let (write_tx, write_rx) = sync_channel::<WriteMsg>(8);
         let (read_tx, read_rx) = channel::<Vec<u8>>();
         self.tx = Some(write_tx.clone());
         if let Ok(mut guard) = EXIT_DEV.lock() {
@@ -376,8 +390,11 @@ impl App {
                 if !SESSION_RUNNING.load(Ordering::SeqCst) {
                     break;
                 }
-                if tx.send(WriteMsg::Frames(vec![protocol::rgbs()])).is_err() {
-                    break;
+                match tx.try_send(WriteMsg::Frames(vec![protocol::rgbs()])) {
+                    Ok(()) => {}
+                    Err(TrySendError::Disconnected(_)) => break,
+                    // 队列满时丢弃本次心跳，下个周期重试
+                    Err(TrySendError::Full(_)) => {}
                 }
             });
         }
@@ -419,6 +436,11 @@ impl App {
 
         // 主事件循环：20ms 短超时，其间处理动作线程回传的效果（长动作不再阻塞输入）
         loop {
+            if EXIT_REQUESTED.load(Ordering::SeqCst) {
+                crate::log_info!("收到退出请求，结束会话");
+                self.end_session();
+                return SessionEnd::Exit;
+            }
             self.drain_effects();
             match read_rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(buf) if buf.is_empty() => {
@@ -458,8 +480,13 @@ impl App {
             return SessionEnd::Exit;
         }
         loop {
+            if EXIT_REQUESTED.load(Ordering::SeqCst) {
+                crate::log_info!("离线模式收到退出请求");
+                break;
+            }
             std::thread::sleep(Duration::from_millis(200));
         }
+        SessionEnd::Exit
     }
 
     /// 结束会话：停止写线程、释放设备句柄
@@ -495,7 +522,8 @@ impl App {
             let _ = file.flush();
         }
         if let Some(tx) = &self.tx {
-            let _ = tx.send(msg);
+            // 有界队列：满时丢弃（主线程不阻塞），避免设备卡顿时帧无限积压
+            let _ = tx.try_send(msg);
         }
     }
 
@@ -577,7 +605,7 @@ impl App {
             self.page_idx
         );
         if let Some(v) = self.cache.get(&sig) {
-            return Ok(v.clone());
+            return Ok(v);
         }
         let png = render_control_bar(&self.scene.touchbar, &self.scene.dir, self.scroll)?;
         Ok(self.cache.put(sig, png))
@@ -601,7 +629,7 @@ impl App {
         let page_number = (self.page_idx + 1).min(10) as u8;
         let sig = format!("{}|knob|{}|{}", self.page_dir.display(), pos, page_number);
         if let Some(v) = self.cache.get(&sig) {
-            return Ok(v.clone());
+            return Ok(v);
         }
         let action = self.actions.get(&pos).cloned();
         let png = render_knob(action.as_ref(), &self.page_dir, 0, page_number)?;
@@ -616,7 +644,7 @@ impl App {
         };
         let sig = format!("{}|{}|{}", self.page_dir.display(), pos, state_idx);
         if let Some(v) = self.cache.get(&sig) {
-            return Ok(v.clone());
+            return Ok(v);
         }
         let action = self.actions.get(pos).cloned();
         let png = render_key(action.as_ref(), &self.page_dir, state_idx)?;

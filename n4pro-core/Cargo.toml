@@ -1,6 +1,6 @@
 [package]
 name = "n4pro-core"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 description = "N4 Pro 按键屏重制版（只读配置 / 纯 HID / 无 UI）"
 
@@ -11,7 +11,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 ureq = "2.12"
 
 [profile.release]
-opt-level = "z"
+# 由体积优先改为速度优先：PNG 编码/缩放是整页刷新与 Control Bar 拖动的热点路径
+opt-level = 2
 lto = true
 codegen-units = 1
 panic = "abort"

@@ -163,8 +163,8 @@ unsafe fn show_menu(hwnd: HWND) {
     match cmd {
         MENU_SHOW => show_window(hwnd),
         MENU_EXIT => {
-            crate::app::send_exit_frame_from_handler();
-            std::process::exit(0);
+            // 发送结束帧并请求主循环优雅退出，统一走 end_session 收尾
+            crate::app::graceful_exit();
         }
         _ => {}
     }

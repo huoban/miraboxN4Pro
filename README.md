@@ -898,3 +898,31 @@ for child in children {
 - GDI 对象与剪贴板失败路径释放（§2.3 / §2.4）。
 
 其余为健壮性加固与代码整洁项，可按排期逐步清理（`cargo clippy --fix` 可先消化 7 处）。
+
+---
+
+### 版本号：1.0.2
+- 编译时间：2026-11-16 05:35
+- 环境配置：`D:\Ai\CodeBuddy\N4-pro\n4pro-core`（Rust x86_64-msvc，以 `cargo build --release` 执行）
+- 编译结果：编译成功；单元测试 14/14 通过
+- 本次版本变更概要：
+  1. 新增：无（本次为缺陷修复与健壮性完善）
+  2. 修改：
+     - 热键 Win 修饰键：字段读取由 `KeyCmd`/`RKeyCmd` 改为文档 05 的 `KeyWin`/`RKeyWin`（同时兼容旧写法），修复含 Win 键组合键不生效
+     - 普通热键支持 `executionTimes` 重复执行次数（上限 20，与 Super Hotkeys 一致）
+     - HID 写超时后调用 `CancelIo` 取消挂起的重叠写，消除栈上 `OVERLAPPED` 被异步回写的未定义行为风险
+     - 修复 USB 等待中 `MsgWaitForMultipleObjects` 返回值判断（`r == 1` → `r == 0`），事件驱动唤醒路径恢复生效
+     - `BAT` 头帧显式写入分片序号字段（载荷 `[13]`，整图单次发送为 0，与官方抓包一致）
+     - 写队列由无界 `channel` 改为有界 `sync_channel`（容量 8），满则丢弃新帧，心跳改 `try_send`，避免设备卡顿/断连时帧无界积压
+     - `ImageCache` 由「满即整体清空」改为 LRU 淘汰，避免 Control Bar 拖动时整表清空导致全量重渲染
+     - `run_offline` 离线模式不再死循环，收到退出请求即返回
+     - 托盘「退出」改走 `graceful_exit`：发送 `CLE+DC` 后请求主循环优雅退出，统一走 `end_session` 收尾（替代直接 `process::exit`）；USB 等待态也可被退出请求打断
+     - release 优化级别 `opt-level` 由 `z` 改为 `2`（体积换速度，缓解 PNG 编码/缩放的整页刷新与拖动热点）
+     - 为 6 个含中文测试函数名的 `mod tests` 加 `#[allow(non_snake_case)]`，消除命名告警
+  3. 删除：无
+  4. 兼容说明：
+     - 退出帧 `"DC"` 位置（载荷偏移 1 字节之疑）经评审确认忽略，保持现状不改动
+     - `ureq` 依赖保留默认 `tls` 特性：HTTP 动作的 URL 可能为 `https`，需 TLS 支持；正文 `gzip` 解压能力未使用但不影响
+     - 协议帧布局（DIS/LIG/BAT/BGPIC/CLE/SETLB/STP/CONNECT）、按键槽位映射、触摸条命中公式均未改动
+
+---
