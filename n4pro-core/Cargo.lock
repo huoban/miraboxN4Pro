@@ -319,9 +319,10 @@ dependencies = [
 
 [[package]]
 name = "n4pro-core"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "image",
+ "png",
  "serde",
  "serde_json",
  "ureq",

@@ -121,7 +121,79 @@ impl Canvas {
         self.data = out;
     }
 
+    /// PNG 编码入口：优先调色板（PNG-8）；若体积仍超过 65535 字节，自动降到 3-3-2 量化再编码
+    /// 设备 BGPIC/BAT 的长度字段只有 16 位（官方抓包最大 28KB），超过 65535 会被固件截断
     pub fn encode_png(&self) -> Result<Vec<u8>, String> {
+        let first = match self.encode_png_indexed(false) {
+            Ok(v) => v,
+            Err(_) => return self.encode_png_rgba(),
+        };
+        if first.len() <= 0xFFFF {
+            return Ok(first);
+        }
+        let second = self.encode_png_indexed(true)?;
+        if second.len() <= 0xFFFF {
+            crate::log_warn!(
+                "PNG 调色板编码超限（{} 字节），已降色为 3-3-2 量化（{} 字节）",
+                first.len(),
+                second.len()
+            );
+            Ok(second)
+        } else {
+            Err(format!("PNG 体积超限：{} 字节", second.len()))
+        }
+    }
+
+    /// 调色板 PNG（PNG-8）：颜色不超过 256 时使用精确调色板，force_quantize 时强制 3-3-2 量化
+    fn encode_png_indexed(&self, force_quantize: bool) -> Result<Vec<u8>, String> {
+        use std::collections::HashMap;
+        let w = self.width as usize;
+        let h = self.height as usize;
+        let n = w * h;
+        let mut indices = vec![0u8; n];
+        let mut palette: Vec<u8> = Vec::new();
+        if !force_quantize {
+            let mut map: HashMap<[u8; 3], u8> = HashMap::new();
+            let mut exact = true;
+            for i in 0..n {
+                let p = &self.data[i * 4..i * 4 + 3];
+                let key = [p[0], p[1], p[2]];
+                if let Some(&idx) = map.get(&key) {
+                    indices[i] = idx;
+                } else if palette.len() < 256 * 3 {
+                    let idx = (palette.len() / 3) as u8;
+                    map.insert(key, idx);
+                    palette.extend_from_slice(&key);
+                    indices[i] = idx;
+                } else {
+                    exact = false;
+                    break;
+                }
+            }
+            if exact {
+                return write_indexed_png(self.width, self.height, &palette, &indices);
+            }
+        }
+        // 3-3-2 均匀量化到 256 色
+        palette.clear();
+        palette.resize(256 * 3, 0);
+        for idx in 0..256usize {
+            let r = ((idx >> 5) & 0x07) * 255 / 7;
+            let g = ((idx >> 2) & 0x07) * 255 / 7;
+            let b = (idx & 0x03) * 255 / 3;
+            palette[idx * 3] = r as u8;
+            palette[idx * 3 + 1] = g as u8;
+            palette[idx * 3 + 2] = b as u8;
+        }
+        for i in 0..n {
+            let p = &self.data[i * 4..i * 4 + 3];
+            indices[i] = ((p[0] >> 5) << 5) | ((p[1] >> 5) << 2) | (p[2] >> 6);
+        }
+        write_indexed_png(self.width, self.height, &palette, &indices)
+    }
+
+    /// RGBA 直通编码（调色板失败时的回退路径）
+    fn encode_png_rgba(&self) -> Result<Vec<u8>, String> {
         let mut out = Vec::new();
         let encoder = image::codecs::png::PngEncoder::new_with_quality(
             &mut out,
@@ -138,6 +210,30 @@ impl Canvas {
             .map_err(|e| format!("PNG 编码失败: {}", e))?;
         Ok(out)
     }
+}
+
+/// 写出索引色 PNG（调色板 + 索引数据）
+fn write_indexed_png(
+    width: u32,
+    height: u32,
+    palette: &[u8],
+    indices: &[u8],
+) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, width, height);
+        enc.set_color(png::ColorType::Indexed);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_palette(palette.to_vec());
+        enc.set_compression(png::Compression::High);
+        let mut writer = enc
+            .write_header()
+            .map_err(|e| format!("PNG 头写入失败: {}", e))?;
+        writer
+            .write_image_data(indices)
+            .map_err(|e| format!("PNG 数据写入失败: {}", e))?;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
