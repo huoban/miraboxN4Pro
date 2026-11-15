@@ -1,5 +1,5 @@
 // 动作线程池：常驻 worker + 空闲回收
-// 规则：并发上限 15；至少保留 1 个常驻；空闲超过 3 个时多余线程退出；单线程空闲 24 小时回收
+// 规则：并发上限 15；至少保留 1 个常驻；空闲超过 3 个时多余线程退出；单线程空闲 10 秒回收
 // 仅用于动作执行，不承载 HID 读/写线程（那两条线程保持常驻独立）
 
 use std::collections::VecDeque;
@@ -74,11 +74,11 @@ impl ActionPool {
                             break Some(j);
                         }
                         let (g, t) = cv
-                            .wait_timeout(s, Duration::from_secs(60))
+                            .wait_timeout(s, Duration::from_secs(2))
                             .unwrap_or_else(|e| e.into_inner());
                         s = g;
                         if t.timed_out() && s.queue.is_empty() {
-                            let idle_long = idle_since.elapsed() >= Duration::from_secs(24 * 3600);
+                            let idle_long = idle_since.elapsed() >= Duration::from_secs(10);
                             if (s.idle > max_idle || idle_long) && s.idle > 1 {
                                 s.idle -= 1;
                                 s.workers -= 1;
