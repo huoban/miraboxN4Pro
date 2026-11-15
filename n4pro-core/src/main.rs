@@ -9,6 +9,7 @@ mod config;
 mod device;
 mod logging;
 mod platform;
+mod pool;
 mod render;
 mod ui;
 

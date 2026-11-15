@@ -7,11 +7,11 @@ use crate::render::key::{render_key, render_label};
 use crate::render::knob::render_knob;
 use crate::render::touchbar::{render_black_bar, render_control_bar, BTN_STEP};
 use crate::render::ImageCache;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -27,6 +27,12 @@ enum WriteMsg {
     Frames(Vec<Vec<u8>>),
     /// 整页刷新批次（以 CLE 开头）
     Refresh(Vec<Vec<u8>>),
+}
+
+/// 动作线程回传的效果：带页面代次，代次不一致说明用户已切页，结果丢弃
+pub struct EffectMsg {
+    pub generation: u64,
+    pub effect: Effect,
 }
 
 /// 会话结束方式：退出程序 / 等待设备后重连
@@ -112,6 +118,15 @@ pub struct App {
     probe: bool,
     log_input: bool,
     slot_test: bool,
+    /// 动作线程池（长动作不阻塞输入与切页）
+    pool: crate::pool::ActionPool,
+    /// 动作线程回传效果
+    effect_tx: Sender<EffectMsg>,
+    effect_rx: Receiver<EffectMsg>,
+    /// 正在执行的动作 ID 集合：同一动作执行期间重复触发被忽略
+    running: Arc<Mutex<HashSet<String>>>,
+    /// 页面代次：切页/切场景时递增，用于丢弃迟到的动作效果
+    page_generation: u64,
 }
 
 impl App {
@@ -139,6 +154,7 @@ impl App {
         } else {
             None
         };
+        let (effect_tx, effect_rx) = channel();
         let mut app = App {
             cfg,
             scene,
@@ -167,6 +183,11 @@ impl App {
             probe,
             log_input,
             slot_test,
+            pool: crate::pool::ActionPool::new(15, 3),
+            effect_tx,
+            effect_rx,
+            running: Arc::new(Mutex::new(HashSet::new())),
+            page_generation: 0,
         };
         app.resolve_current_page();
         app.load_current_page();
@@ -198,6 +219,8 @@ impl App {
 
     /// 加载当前页的动作与图片基准目录
     fn load_current_page(&mut self) {
+        // 页面内容变化即递增代次：迟到的动作效果与服务中的旧渲染结果都会被丢弃
+        self.page_generation += 1;
         self.actions.clear();
         self.cache.clear();
         let page_name = self.scene.pages.get(self.page_idx).cloned().unwrap_or_default();
@@ -392,9 +415,10 @@ impl App {
             return SessionEnd::Exit;
         }
 
-        // 主事件循环：空帧=设备断开
+        // 主事件循环：20ms 短超时，其间处理动作线程回传的效果（长动作不再阻塞输入）
         loop {
-            match read_rx.recv_timeout(Duration::from_millis(100)) {
+            self.drain_effects();
+            match read_rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(buf) if buf.is_empty() => {
                     crate::log_warn!("HID 读取线程检测到设备断开");
                     break;
@@ -731,15 +755,45 @@ impl App {
         }
         if down {
             if let Some(def) = self.actions.get(&pos).cloned() {
+                let action_key = if def.action_id.is_empty() {
+                    def.uuid.clone()
+                } else {
+                    def.action_id.clone()
+                };
+                {
+                    let mut set = self.running.lock().unwrap_or_else(|e| e.into_inner());
+                    if !set.insert(action_key.clone()) {
+                        crate::log_info!(
+                            "按键 {}（配置 {}）的动作「{}」仍在执行，忽略本次触发",
+                            index,
+                            pos,
+                            def.name
+                        );
+                        return;
+                    }
+                }
                 crate::log_info!(
-                    "按键 {}（图像槽位 {}，配置 {}）执行 {}",
+                    "按键 {}（图像槽位 {}，配置 {}）提交动作 {}",
                     index,
                     key_slot(index),
                     pos,
                     def.name
                 );
-                let effect = actions::execute(&def, self.dry_run, 0, Trigger::Press);
-                self.apply_effect(effect);
+                let tx = self.effect_tx.clone();
+                let running = Arc::clone(&self.running);
+                let dry = self.dry_run;
+                let gen = self.page_generation;
+                self.pool.submit(move || {
+                    let effect = actions::execute(&def, dry, 0, Trigger::Press);
+                    running
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&action_key);
+                    let _ = tx.send(EffectMsg {
+                        generation: gen,
+                        effect,
+                    });
+                });
             } else {
                 crate::log_info!(
                     "按键 {}（图像槽位 {}，配置 {}）未绑定动作",
@@ -916,6 +970,17 @@ impl App {
         crate::log_info!("切换到页面 {}/{}", self.page_idx + 1, len);
         self.load_current_page();
         self.refresh_all();
+    }
+
+    /// 处理动作线程回传的效果；页面代次不一致说明已切页，丢弃
+    fn drain_effects(&mut self) {
+        while let Ok(msg) = self.effect_rx.try_recv() {
+            if msg.generation == self.page_generation {
+                self.apply_effect(msg.effect);
+            } else {
+                crate::log_info!("动作完成时页面已切换，丢弃该动作的页面效果");
+            }
+        }
     }
 
     fn apply_effect(&mut self, effect: Effect) {
