@@ -3,20 +3,13 @@
 
 use crate::config::ActionDef;
 use crate::render::canvas::Canvas;
-use crate::render::key::load_icon;
+use crate::render::key::{load_icon, load_icon_ex, plugins_dir};
 use crate::render::text::{draw_text, TextAlign};
 use image::RgbaImage;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub const KNOB_WIDTH: u32 = 176;
 pub const KNOB_HEIGHT: u32 = 112;
-
-fn plugins_dir() -> PathBuf {
-    let base = std::env::var("ProgramFiles(x86)")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("C:\\Program Files (x86)"));
-    base.join("StreamDock").join("plugins")
-}
 
 fn load_builtin(rel: &str) -> Option<RgbaImage> {
     let path = plugins_dir().join(rel);
@@ -86,11 +79,18 @@ pub fn render_knob(
     if let Some(def) = action {
         if !def.states.is_empty() {
             let state = &def.states[state_idx.min(def.states.len() - 1)];
+            // 顺序：模板内自定义图 → 官方旋钮专用内置图 → 插件目录通用回退
             let image = state
                 .image
                 .as_deref()
                 .and_then(|s| load_icon(base_dir, s))
-                .or_else(|| builtin_icon(def, page_number));
+                .or_else(|| builtin_icon(def, page_number))
+                .or_else(|| {
+                    state
+                        .image
+                        .as_deref()
+                        .and_then(|s| load_icon_ex(base_dir, s, Some(&def.uuid), true))
+                });
             let has_image = image.is_some();
             if let Some(img) = image {
                 canvas.draw_fit(&img, 0, 0, KNOB_WIDTH, KNOB_HEIGHT);

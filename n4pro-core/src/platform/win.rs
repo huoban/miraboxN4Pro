@@ -578,6 +578,15 @@ pub fn mouse_move_to(x: i32, y: i32) {
     }
 }
 
+/// 读取鼠标当前位置（像素）
+pub fn cursor_pos() -> (i32, i32) {
+    let mut p = POINT::default();
+    unsafe {
+        GetCursorPos(&mut p);
+    }
+    (p.x, p.y)
+}
+
 /// 鼠标按键：0=左 1=右 2=中 3=侧键1 4=侧键2
 pub fn mouse_button(button: i32, down: bool) {
     let (flag, data) = match button {
