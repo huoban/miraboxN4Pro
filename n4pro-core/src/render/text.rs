@@ -103,9 +103,10 @@ pub fn draw_text_rect(
         );
         let old_font = SelectObject(mem, font);
 
+        // 用白色绘制得到覆盖度蒙版：若按配置颜色绘制，黑色文字像素为 (0,0,0)，
+        // 与黑底无法区分，会被误判为透明而整块丢弃
         SetBkMode(mem, TRANSPARENT);
-        let colorref = (color[0] as u32) | ((color[1] as u32) << 8) | ((color[2] as u32) << 16);
-        SetTextColor(mem, colorref);
+        SetTextColor(mem, 0x00FF_FFFF);
 
         let wide: Vec<u16> = text.encode_utf16().collect();
         let mut rect = RECT {
@@ -128,17 +129,18 @@ pub fn draw_text_rect(
         }
         DrawTextW(mem, wide.as_ptr(), wide.len() as i32, &mut rect, flags);
 
-        // 读取 DIB 并合成（未绘制像素为 0，用最大通道近似覆盖率）
+        // 读取 DIB 并合成：白字蒙版的最大通道即覆盖度，颜色仍用配置值
         let pixels = std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize);
         for y in 0..h as u32 {
             for x in 0..w as u32 {
                 let idx = ((y * w as u32 + x) * 4) as usize;
-                let b = pixels[idx];
-                let g = pixels[idx + 1];
-                let r = pixels[idx + 2];
-                let a = r.max(g).max(b);
-                if a > 0 {
-                    canvas.blend_text_pixel(x as i32, y as i32, [r, g, b, a]);
+                let coverage = pixels[idx].max(pixels[idx + 1]).max(pixels[idx + 2]);
+                if coverage > 0 {
+                    canvas.blend_text_pixel(
+                        x as i32,
+                        y as i32,
+                        [color[0], color[1], color[2], coverage],
+                    );
                 }
             }
         }
@@ -149,5 +151,58 @@ pub fn draw_text_rect(
         DeleteObject(bitmap);
         DeleteDC(mem);
         ReleaseDC(0, screen);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 黑字必须能叠加：渲染到白底后应出现暗像素
+    /// （旧实现用 max(r,g,b) 当透明度，纯黑文字覆盖度恒为 0 被整块丢弃）
+    #[test]
+    fn 黑色文字可正常合成() {
+        let mut canvas = Canvas::new_black(112, 112);
+        canvas.fill_rect(0, 0, 112, 112, [255, 255, 255]);
+        draw_text(
+            &mut canvas,
+            "待用",
+            "Microsoft YaHei",
+            24,
+            true,
+            false,
+            [0, 0, 0],
+            TextAlign::Middle,
+            2,
+        );
+        let dark = canvas
+            .data
+            .chunks_exact(4)
+            .filter(|p| p[0] < 128 && p[1] < 128 && p[2] < 128)
+            .count();
+        assert!(dark > 20, "黑色文字未合成到画布，暗像素数={}", dark);
+    }
+
+    /// 彩色文字仍按配置颜色输出
+    #[test]
+    fn 彩色文字保持配置颜色() {
+        let mut canvas = Canvas::new_black(112, 112);
+        draw_text(
+            &mut canvas,
+            "AAA",
+            "Microsoft YaHei",
+            24,
+            true,
+            false,
+            [255, 255, 0],
+            TextAlign::Middle,
+            2,
+        );
+        let yellow = canvas
+            .data
+            .chunks_exact(4)
+            .filter(|p| p[0] > 200 && p[1] > 200 && p[2] < 60)
+            .count();
+        assert!(yellow > 20, "黄色文字未按配置颜色输出，像素数={}", yellow);
     }
 }
