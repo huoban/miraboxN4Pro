@@ -117,16 +117,98 @@ pub fn send_entry(entry: &Value, dry_run: bool) -> bool {
     true
 }
 
+/// 归一化热键条目：兼容官方三种历史结构
+/// 1) `Hotkeys: [ {...}, ... ]` 多槽位（当前版本固定 3 条，空槽 VKeyCode=-1）
+/// 2) `Hotkeys: { ... }` 单条对象
+/// 3) `Settings` 本身即 `Key*`/`VKeyCode` 的旧版扁平结构（无 Hotkeys）
+pub fn entries(settings: &Value) -> Vec<Value> {
+    match settings.get("Hotkeys") {
+        Some(Value::Array(list)) => list.clone(),
+        Some(obj @ Value::Object(_)) => vec![obj.clone()],
+        _ => {
+            let flat = ["VKeyCode", "VKeyCodes", "KeyCtrl", "KeyShift", "KeyOption", "KeyCmd"]
+                .iter()
+                .any(|k| settings.get(*k).is_some());
+            if flat {
+                vec![settings.clone()]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
 pub fn run(settings: &Value, dry_run: bool) {
-    let Some(list) = settings.get("Hotkeys").and_then(|v| v.as_array()) else {
-        crate::log_warn!("热键动作缺少 Hotkeys 配置");
+    let list = entries(settings);
+    if !list.iter().any(|e| !parse_vks(e).is_empty()) {
+        crate::log_warn!("热键动作缺少有效按键配置");
         return;
-    };
+    }
     // 普通热键同样支持 executionTimes 重复执行次数（与 Super Hotkeys 一致，上限 20）
     let times = s_i64(settings, &["executionTimes", "times"]).unwrap_or(1).clamp(1, 20);
     for _ in 0..times {
-        for entry in list {
+        for entry in &list {
             send_entry(entry, dry_run);
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 当前版本：Hotkeys 固定 3 槽位，空槽 VKeyCode=-1
+    #[test]
+    fn 解析多槽位热键() {
+        let s = json!({"Coalesce": true, "Hotkeys": [
+            {"VKeyCode": 77, "VKeyCodes": [], "KeyCtrl": true, "KeyShift": true},
+            {"VKeyCode": -1, "VKeyCodes": []},
+            {"VKeyCode": -1, "VKeyCodes": []}
+        ]});
+        let list = entries(&s);
+        assert_eq!(list.len(), 3);
+        assert_eq!(parse_vks(&list[0]), vec![77]);
+        assert!(parse_vks(&list[1]).is_empty());
+    }
+
+    /// 旧版扁平结构：Settings 直接是 Key*（如 WZL914S3 场景）
+    #[test]
+    fn 解析扁平热键() {
+        let s = json!({"KeyCmd": true, "VKeyCode": 109, "KeyCtrl": false});
+        let list = entries(&s);
+        assert_eq!(list.len(), 1);
+        assert_eq!(parse_vks(&list[0]), vec![109]);
+    }
+
+    /// 单条对象形态
+    #[test]
+    fn 解析单条对象热键() {
+        let s = json!({"Hotkeys": {"VKeyCode": 32, "KeyShift": true}});
+        let list = entries(&s);
+        assert_eq!(list.len(), 1);
+        assert_eq!(parse_vks(&list[0]), vec![32]);
+    }
+
+    /// 多主键组合：VKeyCode 会重复出现在 VKeyCodes 首位，需去重且保持顺序
+    #[test]
+    fn 多主键组合去重保序() {
+        let s = json!({"VKeyCode": 33, "VKeyCodes": [33, 34, 36, 8, 220, 79]});
+        assert_eq!(parse_vks(&s), vec![33, 34, 36, 8, 220, 79]);
+    }
+
+    /// 左右修饰键与 ⌘(KeyCmd) 映射
+    #[test]
+    fn 解析左右修饰键() {
+        let s = json!({
+            "VKeyCode": 39,
+            "KeyCtrl": true, "KeyShift": true, "KeyOption": true, "KeyCmd": true,
+            "RKeyCtrl": true, "RKeyShift": true, "RKeyOption": true
+        });
+        let m = parse_mods(&s);
+        assert!(m.ctrl && m.shift && m.alt && m.win);
+        assert!(m.r_ctrl && m.r_shift && m.r_alt && !m.r_win);
+    }
+}
+
+

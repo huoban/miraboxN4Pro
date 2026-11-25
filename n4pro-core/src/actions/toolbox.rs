@@ -38,13 +38,14 @@ pub fn super_hotkey(settings: &Value, dry_run: bool) {
         }
         return;
     }
-    let Some(list) = settings.get("Hotkeys").and_then(|v| v.as_array()) else {
-        crate::log_warn!("Super Hotkeys 缺少 Hotkeys 配置");
+    let list = hotkey::entries(settings);
+    if !list.iter().any(|e| !hotkey::parse_vks(e).is_empty()) {
+        crate::log_warn!("Super Hotkeys 缺少有效按键配置");
         return;
-    };
+    }
     let times = s_i64(settings, &["executionTimes", "times"]).unwrap_or(1).clamp(1, 20);
     for _ in 0..times {
-        run_hotkey_list(list, dry_run);
+        run_hotkey_list(&list, dry_run);
     }
 }
 
